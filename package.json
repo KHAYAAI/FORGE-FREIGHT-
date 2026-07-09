@@ -1,0 +1,19 @@
+{
+  "name": "forge-freight",
+  "private": true,
+  "version": "0.1.0",
+  "description": "FORGE Freight — digital freight forwarding operating system for African trade corridors",
+  "engines": {
+    "node": ">=22"
+  },
+  "packageManager": "pnpm@10.33.0",
+  "scripts": {
+    "build": "pnpm -r build",
+    "test": "pnpm -r test",
+    "typecheck": "pnpm -r typecheck",
+    "lint": "pnpm -r lint",
+    "dev:infra": "docker compose up -d",
+    "db:migrate": "pnpm --filter @forge-freight/db migrate",
+    "db:seed": "pnpm --filter @forge-freight/db seed"
+  }
+}
