@@ -10,6 +10,7 @@ import {
   bookings,
   containers,
   legs,
+  parties,
   quotes,
   shipmentParties,
   shipments,
@@ -21,8 +22,10 @@ import {
   ShipmentBooked,
   type EventActor,
 } from "@forge-freight/events";
+import { ScreeningService } from "../compliance/screening.service.js";
 import { DB } from "../db/db.module.js";
 import { appendEvent } from "../db/event-store.js";
+import { TemporalService } from "../temporal/temporal.service.js";
 import { assertBookable, planLegs, QuoteNotBookableError } from "./booking-rules.js";
 
 export interface BookQuoteResult {
@@ -33,7 +36,11 @@ export interface BookQuoteResult {
 
 @Injectable()
 export class BookingsService {
-  constructor(@Inject(DB) private readonly db: Db) {}
+  constructor(
+    @Inject(DB) private readonly db: Db,
+    private readonly temporal: TemporalService,
+    private readonly screening: ScreeningService,
+  ) {}
 
   /**
    * Convert an issued quote into a booking + shipment (with containers and
@@ -59,6 +66,25 @@ export class BookingsService {
         throw new ConflictException(err.message);
       }
       throw err;
+    }
+
+    // Re-screen the customer at booking — lists change between quote and book.
+    const [customer] = await this.db
+      .select({ name: parties.name, country: parties.country })
+      .from(parties)
+      .where(eq(parties.id, quote.customerId));
+    if (customer) {
+      const screening = await this.screening.screenParty({
+        partyId: quote.customerId,
+        name: customer.name,
+        country: customer.country,
+        tenantId: quote.tenantId,
+      });
+      if (screening.verdict === "HIT") {
+        throw new ConflictException(
+          "Booking blocked: customer failed sanctions screening — escalated to compliance",
+        );
+      }
     }
 
     const bookingId = randomUUID();
@@ -167,6 +193,22 @@ export class BookingsService {
 
       return shipment!.reference;
     });
+
+    // Outside the transaction: workflow start is best-effort; the lifecycle
+    // projector keeps projections correct regardless.
+    if (this.temporal.enabled) {
+      const workflowId = await this.temporal.startShipmentLifecycle({
+        shipmentId,
+        tenantId: quote.tenantId,
+        transitDays: null,
+      });
+      if (workflowId) {
+        await this.db
+          .update(shipments)
+          .set({ workflowId })
+          .where(eq(shipments.id, shipmentId));
+      }
+    }
 
     return { bookingId, shipmentId, reference };
   }

@@ -319,6 +319,36 @@ export const containers = pgTable("containers", {
   grossWeightKg: doublePrecision("gross_weight_kg"),
 });
 
+export const exceptionCode = pgEnum("exception_code", [
+  "BOOKING_ROLLED",
+  "CUSTOMS_STOP",
+  "CUSTOMS_QUERY",
+  "CONGESTION_DELAY",
+  "COMPLIANCE_HOLD",
+]);
+
+/** Ops kanban projection: open exceptions = what needs a human today. */
+export const shipmentExceptions = pgTable(
+  "shipment_exceptions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id").notNull().references(() => tenants.id),
+    shipmentId: uuid("shipment_id").notNull().references(() => shipments.id),
+    code: exceptionCode("code").notNull(),
+    detail: text("detail"),
+    raisedAt: timestamp("raised_at", { withTimezone: true }).notNull(),
+    clearedAt: timestamp("cleared_at", { withTimezone: true }),
+  },
+  (t) => [index("shipment_exceptions_open_idx").on(t.tenantId, t.shipmentId)],
+);
+
+/** Watermarks for in-process event consumers (projector, billing, ledger). */
+export const consumerOffsets = pgTable("consumer_offsets", {
+  consumer: text("consumer").primaryKey(),
+  lastRecordedAt: timestamp("last_recorded_at", { withTimezone: true }).notNull(),
+  lastEventId: uuid("last_event_id").notNull(),
+});
+
 // ---------------------------------------------------------------------------
 // Documents
 // ---------------------------------------------------------------------------
@@ -454,6 +484,35 @@ export const invoices = pgTable("invoices", {
   dueDate: timestamp("due_date", { withTimezone: true }).notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+/**
+ * Revenue Ontology feed: ledger events produced by the ontology bridge from
+ * financial freight events. ForgePay consumes this; the trade-finance views
+ * (duty-financing eligibility, factoring status) are computed over it.
+ */
+export const ledgerEvents = pgTable(
+  "ledger_events",
+  {
+    ledgerEventId: uuid("ledger_event_id").primaryKey(),
+    type: text("type").notNull(),
+    sourceEventId: uuid("source_event_id").notNull(),
+    sourceEventType: text("source_event_type").notNull(),
+    tenantId: uuid("tenant_id").notNull(),
+    shipmentId: uuid("shipment_id"),
+    counterpartyId: uuid("counterparty_id"),
+    amountCents: bigint("amount_cents", { mode: "number" }),
+    currency: text("currency"),
+    trigger: text("trigger"),
+    signal: text("signal"),
+    occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull(),
+    metadata: jsonb("metadata").notNull(),
+  },
+  (t) => [
+    // Replay-safe: one ledger event per (source event, ledger type).
+    uniqueIndex("ledger_events_source_uq").on(t.sourceEventId, t.type),
+    index("ledger_events_shipment_idx").on(t.shipmentId),
+  ],
+);
 
 // ---------------------------------------------------------------------------
 // Events — append-only, mirrored to Redpanda. THE source of truth.

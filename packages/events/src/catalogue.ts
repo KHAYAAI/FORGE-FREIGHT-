@@ -225,6 +225,41 @@ export const PodConfirmed = defineEvent({
   }),
 });
 
+export const ShipmentExceptionRaised = defineEvent({
+  type: "shipment.exception_raised",
+  version: 1,
+  financial: false,
+  description:
+    "An exception needs a human: rolled booking, customs stop/query, congestion delay, compliance hold. Feeds the ops kanban.",
+  schema: z.object({
+    code: z.enum([
+      "BOOKING_ROLLED",
+      "CUSTOMS_STOP",
+      "CUSTOMS_QUERY",
+      "CONGESTION_DELAY",
+      "COMPLIANCE_HOLD",
+    ]),
+    detail: z.string().nullable(),
+  }),
+});
+
+export const ShipmentExceptionCleared = defineEvent({
+  type: "shipment.exception_cleared",
+  version: 1,
+  financial: false,
+  description: "A previously raised exception was resolved.",
+  schema: z.object({
+    code: z.enum([
+      "BOOKING_ROLLED",
+      "CUSTOMS_STOP",
+      "CUSTOMS_QUERY",
+      "CONGESTION_DELAY",
+      "COMPLIANCE_HOLD",
+    ]),
+    detail: z.string().nullable(),
+  }),
+});
+
 // ---------------------------------------------------------------------------
 // Customs
 // ---------------------------------------------------------------------------
@@ -439,6 +474,8 @@ export const catalogue = [
   ContainerGatedOut,
   RoadPositionReported,
   PodConfirmed,
+  ShipmentExceptionRaised,
+  ShipmentExceptionCleared,
   EntryPrepared,
   EntrySubmitted,
   EntryQueried,

@@ -24,6 +24,23 @@ const ConfigSchema = z
     /** JWT claim carrying the FORGE Freight tenant id. */
     AUTH_TENANT_CLAIM: z.string().default("tenant_id"),
 
+    /** Temporal server, e.g. localhost:7233. Empty = lifecycle timers disabled. */
+    TEMPORAL_ADDRESS: z.string().default(""),
+    TEMPORAL_NAMESPACE: z.string().default("default"),
+
+    /** API key external tracking systems use on /ingest/* webhooks. */
+    INGEST_API_KEY: z.string().default(""),
+
+    /** yente screening endpoint, e.g. http://localhost:8000. Empty = dev skip. */
+    YENTE_URL: z.string().default(""),
+
+    /** Anthropic API key for document extraction. Empty = manual review only. */
+    ANTHROPIC_API_KEY: z.string().default(""),
+    ANTHROPIC_MODEL: z.string().default("claude-opus-4-8"),
+    /** Extractions below this confidence require human review. */
+    EXTRACTION_REVIEW_THRESHOLD: z.coerce.number().min(0).max(1).default(0.85),
+    DOC_STORAGE_DIR: z.string().default("./storage/documents"),
+
     /** Comma-separated brokers, e.g. localhost:19092. Empty = relay disabled. */
     KAFKA_BROKERS: z.string().default(""),
     KAFKA_TOPIC_EVENTS: z.string().default("freight.events"),
@@ -51,6 +68,27 @@ const ConfigSchema = z
           code: z.ZodIssueCode.custom,
           message: "KAFKA_BROKERS is required in production (outbox relay)",
           path: ["KAFKA_BROKERS"],
+        });
+      }
+      if (!cfg.TEMPORAL_ADDRESS) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "TEMPORAL_ADDRESS is required in production (lifecycle timers)",
+          path: ["TEMPORAL_ADDRESS"],
+        });
+      }
+      if (!cfg.INGEST_API_KEY) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "INGEST_API_KEY is required in production (tracking webhooks)",
+          path: ["INGEST_API_KEY"],
+        });
+      }
+      if (!cfg.YENTE_URL) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "YENTE_URL is required in production (sanctions screening)",
+          path: ["YENTE_URL"],
         });
       }
     }

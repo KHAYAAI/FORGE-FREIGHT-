@@ -57,8 +57,23 @@ topic (keyed by shipment for per-shipment ordering).
 | `packages/events` | Versioned canonical event catalogue — the spine of the system |
 | `packages/db` | Drizzle schema, migrations, seed (projections + append-only `events`) |
 | `packages/ontology-bridge` | Freight event → Revenue Ontology mapper (see `docs/ontology-bridge.md`) |
-| `apps/api` | NestJS modular monolith (rates, quoting; more modules per build order) |
+| `apps/api` | NestJS modular monolith — quoting, bookings, shipments, tracking ingest (DCSA/Traccar/EDIFACT), documents (Claude extraction), customs, compliance, billing + finance views |
+| `apps/worker` | Temporal worker — shipment lifecycle workflow (time-based exception escalation) |
+| `apps/web` | Portal — instant quote + booking, shipment timeline, ops exception kanban |
 | `docs/architecture.md` | Architecture, non-negotiables, milestone plan |
+
+## Deploying
+
+`docker-compose.prod.yml` overlays application containers (api, worker, web)
+on the infra stack. Point a TLS-terminating proxy at api (3001) and web
+(3000), configure the env in `.env` (see `.env.example` — production refuses
+to boot without AUTH_ISSUER, KAFKA_BROKERS, TEMPORAL_ADDRESS, INGEST_API_KEY,
+YENTE_URL), create the Keycloak realm with a `tenant_id` claim mapper, run
+`pnpm db:migrate && pnpm db:seed`, and:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+```
 
 ## Development
 

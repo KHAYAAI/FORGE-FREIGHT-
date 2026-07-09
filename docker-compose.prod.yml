@@ -1,0 +1,63 @@
+# Production deployment (single-host Hetzner-style). Infra services come from
+# docker-compose.yml; this overlay adds the application containers.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#
+# Required environment (see .env.example): AUTH_ISSUER, INGEST_API_KEY,
+# YENTE_URL, KAFKA_BROKERS, TEMPORAL_ADDRESS, ANTHROPIC_API_KEY.
+# Put a TLS-terminating reverse proxy (Caddy/Traefik) in front of api + web.
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    environment:
+      NODE_ENV: production
+      PORT: "3001"
+      DATABASE_URL: postgres://forge:${POSTGRES_PASSWORD:-forge}@postgres:5432/forge_freight
+      AUTH_MODE: jwt
+      AUTH_ISSUER: ${AUTH_ISSUER}
+      AUTH_AUDIENCE: ${AUTH_AUDIENCE:-}
+      KAFKA_BROKERS: redpanda:9092
+      TEMPORAL_ADDRESS: temporal:7233
+      INGEST_API_KEY: ${INGEST_API_KEY}
+      YENTE_URL: http://yente:8000
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      CORS_ORIGINS: ${PORTAL_ORIGIN:-http://localhost:3000}
+      DOC_STORAGE_DIR: /data/documents
+    volumes:
+      - documents:/data/documents
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "3001:3001"
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: .
+      dockerfile: apps/worker/Dockerfile
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgres://forge:${POSTGRES_PASSWORD:-forge}@postgres:5432/forge_freight
+      TEMPORAL_ADDRESS: temporal:7233
+    depends_on:
+      - temporal
+      - postgres
+    restart: unless-stopped
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    environment:
+      NODE_ENV: production
+      NEXT_PUBLIC_API_URL: ${PUBLIC_API_URL:-http://localhost:3001}
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+
+volumes:
+  documents:

@@ -1,3 +1,14 @@
+import Link from "next/link";
+
+const card = {
+  display: "block",
+  padding: "1.25rem",
+  border: "1px solid #e5e7eb",
+  borderRadius: 8,
+  textDecoration: "none",
+  color: "inherit",
+} as const;
+
 export default function Home() {
   return (
     <main style={{ maxWidth: 720, margin: "0 auto", padding: "4rem 1.5rem" }}>
@@ -7,21 +18,20 @@ export default function Home() {
         quotes, real container visibility, AI-prepared customs entries, and
         trade finance built into the same ledger that runs your payments.
       </p>
-      <ul>
-        <li>
-          <strong>Customer portal</strong> — where is my stuff (milestone 9)
-        </li>
-        <li>
-          <strong>Ops console</strong> — what needs a human today (milestone 3)
-        </li>
-        <li>
-          <strong>Partner console</strong> — franchise network (milestone 10)
-        </li>
-      </ul>
-      <p>
-        API: <code>POST /quotes</code> on port 3001 — see the repo README for
-        the demo quote request.
-      </p>
+      <div style={{ display: "grid", gap: "1rem", marginTop: "2rem" }}>
+        <Link href="/quotes/new" style={card}>
+          <strong>Instant quote</strong>
+          <div>Itemised multicurrency quote in seconds; book in one click.</div>
+        </Link>
+        <Link href="/shipments" style={card}>
+          <strong>Shipments</strong>
+          <div>Where is my stuff — live event timeline per shipment.</div>
+        </Link>
+        <Link href="/ops" style={card}>
+          <strong>Ops console</strong>
+          <div>What needs a human today — open exceptions kanban.</div>
+        </Link>
+      </div>
     </main>
   );
 }

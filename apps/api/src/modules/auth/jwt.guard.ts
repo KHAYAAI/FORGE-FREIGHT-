@@ -24,6 +24,8 @@ export class JwtAuthGuard implements CanActivate {
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const req = context.switchToHttp().getRequest<Request>();
     if (PUBLIC_PATHS.has(req.path)) return true;
+    // Tracking webhooks authenticate machine-to-machine via IngestKeyGuard.
+    if (req.path.startsWith("/ingest/")) return true;
 
     if (this.cfg.AUTH_MODE === "dev") {
       // Config refuses to boot with AUTH_MODE=dev in production; these

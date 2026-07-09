@@ -44,22 +44,33 @@ apps/
    ZADUR→ZAJNB road, DEHAM→ZADUR). ✅
 2. **Rates & Quoting** — rate cards with validity/surcharges, margin rules,
    quote engine, quote PDF, quote → booking → shipment conversion. ✅
-3. **Shipment lifecycle** — Temporal workflow per shipment, signal-driven
-   milestones, ops exception kanban. Workflow tests must cover the happy path
-   plus rolled booking, customs stop, and port congestion delay.
-4. **Tracking ingest** — adapter plugin interface: AIS (aisstream), DCSA
-   T&T, EDIFACT IFTSTA/CODECO, Traccar webhooks.
-5. **Documents** — upload → Claude extraction with structured output schemas
-   per doc type → confidence-scored review queue → projections.
-6. **Customs** — HS classification (SA tariff book, hybrid retrieval + LLM,
-   human confirm below threshold), duty/VAT calc, bureau-ready entry payload.
-7. **Compliance** — yente screening on party creation and booking; block +
-   escalate on hits.
-8. **Billing & ForgePay bridge** — charge accrual from events, invoicing,
-   ontology bridge relay (spec: docs/ontology-bridge.md, already executable).
-9. **Customer portal** — mobile-first shipment timeline, WhatsApp share
-   links, documents, invoices.
+3. **Shipment lifecycle** — pure lifecycle reducer (tested against the happy
+   path plus rolled booking, customs stop, congestion delay), event
+   dispatcher/projector maintaining status + exceptions, ops exception feed,
+   Temporal workflow (apps/worker) for time-based escalation. ✅
+4. **Tracking ingest** — adapter plugin interface (canonical events only,
+   sourceRef idempotency): DCSA T&T, Traccar webhooks, EDIFACT IFTSTA parser
+   with per-partner status maps. ✅ (AIS/aisstream listener: next)
+5. **Documents** — multipart upload → Claude structured extraction per doc
+   type (zod schemas, self-reported confidence) → review queue; degrades to
+   manual review without an API key. ✅
+6. **Customs** — SA duty/VAT calculator (ATV formula), HS classification
+   with confidence + mandatory human confirm below threshold, entry state
+   machine (DRAFT→PREPARED→SUBMITTED→QUERY/RELEASED/STOPPED), bureau-ready
+   payload. ✅ (tariff dataset is a starter extract — load the full SARS book
+   before classifying beyond it)
+7. **Compliance** — yente screening on party creation and re-screen at
+   booking; HIT blocks the booking and places a compliance hold; screening
+   infrastructure failure fails closed to REVIEW. ✅
+8. **Billing & ForgePay bridge** — vessel.departed accrues quoted charges,
+   entry.released accrues the duty/VAT disbursement, invoice + payment
+   endpoints, ledger sink feeding ledger_events (Revenue Ontology), duty
+   financing/factoring views at GET /finance/views. ✅
+9. **Customer portal** — quote form with one-click booking, shipment list,
+   event timeline, ops exception kanban. ✅ (WhatsApp share + Novu next)
 10. **Partner console** — scoped multi-tenant ops tooling, platform fees.
+    (Tenant scoping is enforced everywhere; the PARTNER_AGENT-specific
+    console is next.)
 
 ## Out of scope (deliberately)
 

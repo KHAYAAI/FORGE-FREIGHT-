@@ -9,7 +9,28 @@ export type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];
  * that writes the projection, or the two can diverge.
  */
 export async function appendEvent(tx: Db | Tx, event: EventEnvelope): Promise<void> {
-  await tx.insert(events).values({
+  await tx.insert(events).values(toRow(event));
+}
+
+/**
+ * Adapter variant: duplicate deliveries of the same external message (same
+ * type + sourceRef) are dropped by the partial unique index — webhooks and
+ * EDI feeds redeliver, canonical history must not.
+ */
+export async function appendEventIdempotent(
+  tx: Db | Tx,
+  event: EventEnvelope,
+): Promise<boolean> {
+  const inserted = await tx
+    .insert(events)
+    .values(toRow(event))
+    .onConflictDoNothing()
+    .returning({ eventId: events.eventId });
+  return inserted.length > 0;
+}
+
+function toRow(event: EventEnvelope) {
+  return {
     eventId: event.eventId,
     shipmentId: event.shipmentId,
     tenantId: event.tenantId,
@@ -20,5 +41,5 @@ export async function appendEvent(tx: Db | Tx, event: EventEnvelope): Promise<vo
     actor: event.actor,
     sourceRef: event.sourceRef ?? null,
     payload: event.payload,
-  });
+  };
 }
