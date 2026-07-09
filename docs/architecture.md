@@ -17,7 +17,13 @@ the ontology bridge — the ForgePay Revenue Ontology.
 - All LLM extraction is human-reviewable with confidence surfaced.
 - Integer cents everywhere; every amount carries its currency. ZAR-first.
 - Event publish uses the transactional outbox: projection write + event
-  append in one Postgres transaction; a relay ships events to Redpanda.
+  append in one Postgres transaction; the relay
+  (`apps/api/src/modules/outbox`) ships unpublished rows to the
+  `freight.events` topic in recorded order, keyed by shipment, at-least-once
+  (consumers dedupe on `eventId`).
+- Auth: Keycloak JWTs verified against the realm JWKS; the tenant comes from
+  the token's `tenant_id` claim, never from the request body. Dev-mode header
+  auth exists but the config loader refuses it in production.
 
 ## Monorepo layout
 
@@ -37,7 +43,7 @@ apps/
    multi-tenancy model, docker-compose infra, seed lanes (CNSHA→ZADUR,
    ZADUR→ZAJNB road, DEHAM→ZADUR). ✅
 2. **Rates & Quoting** — rate cards with validity/surcharges, margin rules,
-   quote engine, quote → booking. Engine ✅; PDF + booking conversion next.
+   quote engine, quote PDF, quote → booking → shipment conversion. ✅
 3. **Shipment lifecycle** — Temporal workflow per shipment, signal-driven
    milestones, ops exception kanban. Workflow tests must cover the happy path
    plus rolled booking, customs stop, and port congestion delay.

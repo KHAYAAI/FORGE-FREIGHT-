@@ -7,12 +7,19 @@ import {
   integer,
   jsonb,
   pgEnum,
+  pgSequence,
   pgTable,
   text,
   timestamp,
   uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
+
+/** Human shipment references: FF-<year>-<zero-padded counter>. */
+export const shipmentRefSeq = pgSequence("shipment_ref_seq", {
+  startWith: 1,
+  increment: 1,
+});
 
 /**
  * System of record. Everything here except `events` is a PROJECTION — the
@@ -467,10 +474,15 @@ export const events = pgTable(
     actor: jsonb("actor").notNull(),
     sourceRef: text("source_ref"),
     payload: jsonb("payload").notNull(),
+    /** Transactional outbox: null until the relay ships the event to Redpanda. */
+    publishedAt: timestamp("published_at", { withTimezone: true }),
   },
   (t) => [
     index("events_shipment_idx").on(t.shipmentId, t.occurredAt),
     index("events_type_idx").on(t.type),
+    index("events_unpublished_idx")
+      .on(t.recordedAt)
+      .where(sql`published_at is null`),
     // Adapter idempotency: same source message never lands twice.
     uniqueIndex("events_source_ref_uq")
       .on(t.type, t.sourceRef)

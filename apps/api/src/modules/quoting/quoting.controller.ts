@@ -1,9 +1,12 @@
-import { Body, Controller, Get, Param, Post } from "@nestjs/common";
+import { Body, Controller, Get, Param, ParseUUIDPipe, Post, Res } from "@nestjs/common";
+import type { Response } from "express";
 import { z } from "zod";
+import { CurrentAuth } from "../auth/current-auth.decorator.js";
+import type { AuthContext } from "../auth/auth.types.js";
+import { QuotePdfService } from "./quote-pdf.service.js";
 import { QuotingService } from "./quoting.service.js";
 
 const QuoteRequestDto = z.object({
-  tenantId: z.string().uuid(),
   customerId: z.string().uuid(),
   origin: z.string().regex(/^[A-Z]{2}[A-Z0-9]{3}$/),
   destination: z.string().regex(/^[A-Z]{2}[A-Z0-9]{3}$/),
@@ -21,22 +24,40 @@ const QuoteRequestDto = z.object({
 
 @Controller("quotes")
 export class QuotingController {
-  constructor(private readonly quoting: QuotingService) {}
+  constructor(
+    private readonly quoting: QuotingService,
+    private readonly pdf: QuotePdfService,
+  ) {}
 
   @Post()
-  async create(@Body() body: unknown) {
+  async create(@Body() body: unknown, @CurrentAuth() auth: AuthContext) {
     const dto = QuoteRequestDto.parse(body);
-    // TODO(auth): tenantId and actor come from the Keycloak token once the
-    // auth guard lands; accepting them in the body is dev-only.
     return this.quoting.issueQuote({
       ...dto,
+      tenantId: auth.tenantId,
       requestedAt: new Date(),
-      actor: { kind: "USER", id: "dev", tenantId: dto.tenantId },
+      actor: { kind: "USER", id: auth.userId, tenantId: auth.tenantId },
     });
   }
 
   @Get(":id")
-  async get(@Param("id") id: string) {
-    return this.quoting.getQuote(id);
+  async get(
+    @Param("id", ParseUUIDPipe) id: string,
+    @CurrentAuth() auth: AuthContext,
+  ) {
+    return this.quoting.getQuote(id, auth.tenantId);
+  }
+
+  @Get(":id/pdf")
+  async getPdf(
+    @Param("id", ParseUUIDPipe) id: string,
+    @CurrentAuth() auth: AuthContext,
+    @Res() res: Response,
+  ) {
+    const data = await this.quoting.getQuotePdfData(id, auth.tenantId);
+    const buffer = await this.pdf.render(data);
+    res.setHeader("content-type", "application/pdf");
+    res.setHeader("content-disposition", `inline; filename="quote-${id}.pdf"`);
+    res.send(buffer);
   }
 }

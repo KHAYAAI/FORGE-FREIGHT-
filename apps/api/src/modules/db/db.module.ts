@@ -1,5 +1,6 @@
 import { Global, Module } from "@nestjs/common";
 import { createDb, type Db } from "@forge-freight/db";
+import { CONFIG, type AppConfig } from "../../config.js";
 
 export const DB = Symbol("DB");
 
@@ -8,7 +9,8 @@ export const DB = Symbol("DB");
   providers: [
     {
       provide: DB,
-      useFactory: (): Db => createDb(),
+      inject: [CONFIG],
+      useFactory: (cfg: AppConfig): Db => createDb(cfg.DATABASE_URL),
     },
   ],
   exports: [DB],

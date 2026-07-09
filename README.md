@@ -21,17 +21,34 @@ pnpm db:seed                  # SA launch lanes + demo tenant
 pnpm --filter @forge-freight/api dev   # API on :3001
 ```
 
-Try a quote (ids come from the seed output):
+Copy `.env.example` to `.env` and adjust. In production the API verifies
+Keycloak-issued JWTs (`AUTH_MODE=jwt`, tenant from the `tenant_id` claim);
+for local development `AUTH_MODE=dev` trusts `x-dev-*` headers — the config
+loader refuses to boot dev auth in production.
+
+Try the quote → PDF → booking flow (ids come from the seed output):
 
 ```bash
-curl -s localhost:3001/quotes -H 'content-type: application/json' -d '{
-  "tenantId": "<operator-tenant-id>",
+# itemised quote in one call
+curl -s localhost:3001/quotes -H 'content-type: application/json' \
+  -H 'x-dev-tenant-id: <operator-tenant-id>' -d '{
   "customerId": "<customer-party-id>",
   "origin": "CNSHA", "destination": "ZADUR",
   "mode": "OCEAN", "containerType": "40HC",
   "quantity": 2, "incoterm": "FOB"
 }'
+
+# customer-facing PDF (sell side only)
+curl -s -H 'x-dev-tenant-id: <tenant>' localhost:3001/quotes/<quote-id>/pdf -o quote.pdf
+
+# convert to booking + shipment (FF-YYYY-NNNNN reference, containers, leg plan)
+curl -s -X POST -H 'x-dev-tenant-id: <tenant>' -H 'content-type: application/json' \
+  localhost:3001/quotes/<quote-id>/book -d '{"carrierBookingRef":"MAEU12345678"}'
 ```
+
+Every write emits catalogue events into the transactional outbox; with
+`KAFKA_BROKERS` set, the relay ships them to the `freight.events` Redpanda
+topic (keyed by shipment for per-shipment ordering).
 
 ## Repo map
 

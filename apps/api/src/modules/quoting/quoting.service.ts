@@ -1,15 +1,16 @@
 import { Inject, Injectable, NotFoundException } from "@nestjs/common";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import {
-  events as eventsTable,
   marginRules,
+  parties,
   quoteLines,
   quotes,
   type Db,
 } from "@forge-freight/db";
 import { makeEvent, QuoteIssued, type EventActor } from "@forge-freight/events";
 import { DB } from "../db/db.module.js";
+import { appendEvent } from "../db/event-store.js";
 import { RatesService } from "../rates/rates.service.js";
 import {
   buildQuote,
@@ -125,31 +126,52 @@ export class QuotingService {
           currency: l.currency,
         })),
       );
-      await tx.insert(eventsTable).values({
-        eventId: event.eventId,
-        shipmentId: null,
-        tenantId: event.tenantId,
-        type: event.type,
-        version: event.version,
-        occurredAt: new Date(event.occurredAt),
-        actor: event.actor,
-        payload: event.payload,
-      });
+      await appendEvent(tx, event);
     });
 
     return { quoteId, result };
   }
 
-  async getQuote(quoteId: string) {
+  /** Tenant-scoped fetch — a quote is invisible outside its tenant. */
+  async getQuote(quoteId: string, tenantId: string) {
     const [quote] = await this.db
       .select()
       .from(quotes)
-      .where(eq(quotes.id, quoteId));
+      .where(and(eq(quotes.id, quoteId), eq(quotes.tenantId, tenantId)));
     if (!quote) throw new NotFoundException(`Quote ${quoteId} not found`);
     const lines = await this.db
       .select()
       .from(quoteLines)
       .where(eq(quoteLines.quoteId, quoteId));
     return { ...quote, lines };
+  }
+
+  async getQuotePdfData(quoteId: string, tenantId: string) {
+    const quote = await this.getQuote(quoteId, tenantId);
+    const [customer] = await this.db
+      .select({ name: parties.name })
+      .from(parties)
+      .where(eq(parties.id, quote.customerId));
+
+    const totalsByCurrency: Record<string, number> = {};
+    for (const line of quote.lines) {
+      totalsByCurrency[line.currency] =
+        (totalsByCurrency[line.currency] ?? 0) + line.sellCents * line.quantity;
+    }
+
+    return {
+      quoteId: quote.id,
+      customerName: customer?.name ?? "—",
+      origin: quote.origin,
+      destination: quote.destination,
+      mode: quote.mode,
+      containerType: quote.containerType,
+      containerQuantity: quote.containerQuantity,
+      incoterm: quote.incoterm,
+      validUntil: quote.validUntil,
+      createdAt: quote.createdAt,
+      lines: quote.lines,
+      totalsByCurrency,
+    };
   }
 }
