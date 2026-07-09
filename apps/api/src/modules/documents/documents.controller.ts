@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Get,
+  Inject,
   Param,
   ParseUUIDPipe,
   Post,
@@ -35,7 +36,7 @@ const ReviewDto = z.object({
 
 @Controller("documents")
 export class DocumentsController {
-  constructor(private readonly documents: DocumentsService) {}
+  constructor(@Inject(DocumentsService) private readonly documents: DocumentsService) {}
 
   @Post()
   @UseInterceptors(

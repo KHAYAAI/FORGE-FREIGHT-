@@ -1,0 +1,202 @@
+@import "tailwindcss";
+
+/*
+ * FORGE Freight design tokens — an operations-console palette: near-monochrome
+ * slate ground, a single restrained signal blue for interactive/primary state,
+ * and desaturated semantic colors for status. Sharp corners, hairline borders,
+ * tabular data. Not a marketing surface — a instrument panel.
+ */
+:root {
+  --bg-canvas: #0a0d12;
+  --bg-surface: #10141b;
+  --bg-raised: #161b24;
+  --bg-inset: #0d1117;
+  --bg-hover: #1c222d;
+
+  --border-hairline: #232a35;
+  --border-strong: #303947;
+
+  --text-primary: #e4e8ef;
+  --text-secondary: #8992a3;
+  --text-tertiary: #5a6373;
+  --text-inverse: #0a0d12;
+
+  --accent: #5b8def;
+  --accent-strong: #7ea4f2;
+  --accent-wash: rgba(91, 141, 239, 0.12);
+  --accent-border: rgba(91, 141, 239, 0.35);
+
+  --success: #4caf7d;
+  --success-wash: rgba(76, 175, 125, 0.14);
+  --warning: #d99a3f;
+  --warning-wash: rgba(217, 154, 63, 0.14);
+  --critical: #dd5f5b;
+  --critical-wash: rgba(221, 95, 91, 0.14);
+  --info: #5b8def;
+  --info-wash: rgba(91, 141, 239, 0.12);
+
+  --shadow-panel: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 24px rgba(0, 0, 0, 0.28);
+  --focus-ring: 0 0 0 2px var(--bg-canvas), 0 0 0 4px var(--accent);
+}
+
+:root[data-theme="light"] {
+  --bg-canvas: #f1f3f6;
+  --bg-surface: #ffffff;
+  --bg-raised: #ffffff;
+  --bg-inset: #eaedf2;
+  --bg-hover: #eef1f6;
+
+  --border-hairline: #dde1e8;
+  --border-strong: #c5cbd6;
+
+  --text-primary: #161b24;
+  --text-secondary: #565f70;
+  --text-tertiary: #838da0;
+  --text-inverse: #f1f3f6;
+
+  --accent: #2f66d0;
+  --accent-strong: #1f52b3;
+  --accent-wash: rgba(47, 102, 208, 0.08);
+  --accent-border: rgba(47, 102, 208, 0.3);
+
+  --success: #1f8a57;
+  --success-wash: rgba(31, 138, 87, 0.1);
+  --warning: #a86a15;
+  --warning-wash: rgba(168, 106, 21, 0.1);
+  --critical: #c23b37;
+  --critical-wash: rgba(194, 59, 55, 0.1);
+  --info: #2f66d0;
+  --info-wash: rgba(47, 102, 208, 0.08);
+
+  --shadow-panel: 0 1px 2px rgba(20, 24, 33, 0.06), 0 8px 24px rgba(20, 24, 33, 0.06);
+  --focus-ring: 0 0 0 2px var(--bg-canvas), 0 0 0 4px var(--accent);
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    --bg-canvas: #f1f3f6;
+    --bg-surface: #ffffff;
+    --bg-raised: #ffffff;
+    --bg-inset: #eaedf2;
+    --bg-hover: #eef1f6;
+
+    --border-hairline: #dde1e8;
+    --border-strong: #c5cbd6;
+
+    --text-primary: #161b24;
+    --text-secondary: #565f70;
+    --text-tertiary: #838da0;
+    --text-inverse: #f1f3f6;
+
+    --accent: #2f66d0;
+    --accent-strong: #1f52b3;
+    --accent-wash: rgba(47, 102, 208, 0.08);
+    --accent-border: rgba(47, 102, 208, 0.3);
+
+    --success: #1f8a57;
+    --success-wash: rgba(31, 138, 87, 0.1);
+    --warning: #a86a15;
+    --warning-wash: rgba(168, 106, 21, 0.1);
+    --critical: #c23b37;
+    --critical-wash: rgba(194, 59, 55, 0.1);
+    --info: #2f66d0;
+    --info-wash: rgba(47, 102, 208, 0.08);
+
+    --shadow-panel: 0 1px 2px rgba(20, 24, 33, 0.06), 0 8px 24px rgba(20, 24, 33, 0.06);
+  }
+}
+
+@theme inline {
+  --color-canvas: var(--bg-canvas);
+  --color-surface: var(--bg-surface);
+  --color-raised: var(--bg-raised);
+  --color-inset: var(--bg-inset);
+  --color-hover: var(--bg-hover);
+
+  --color-hairline: var(--border-hairline);
+  --color-strong: var(--border-strong);
+
+  --color-primary: var(--text-primary);
+  --color-secondary: var(--text-secondary);
+  --color-tertiary: var(--text-tertiary);
+  --color-inverse: var(--text-inverse);
+
+  --color-accent: var(--accent);
+  --color-accent-strong: var(--accent-strong);
+  --color-accent-wash: var(--accent-wash);
+  --color-accent-border: var(--accent-border);
+
+  --color-success: var(--success);
+  --color-success-wash: var(--success-wash);
+  --color-warning: var(--warning);
+  --color-warning-wash: var(--warning-wash);
+  --color-critical: var(--critical);
+  --color-critical-wash: var(--critical-wash);
+  --color-info: var(--info);
+  --color-info-wash: var(--info-wash);
+
+  --font-sans: var(--font-plex-sans), "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-plex-mono), "IBM Plex Mono", ui-monospace, "SFMono-Regular", monospace;
+}
+
+* {
+  border-color: var(--border-hairline);
+}
+
+html {
+  color-scheme: dark;
+}
+
+html[data-theme="light"] {
+  color-scheme: light;
+}
+
+body {
+  background: var(--bg-canvas);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 13.5px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection {
+  background: var(--accent-wash);
+  color: var(--text-primary);
+}
+
+/* Scrollbars — thin, matches the instrument-panel density */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 4px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* Focus visibility — never suppressed */
+:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+  border-radius: 2px;
+}
+
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}

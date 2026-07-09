@@ -2,14 +2,18 @@ import {
   Body,
   Controller,
   Get,
+  Inject,
   Param,
   ParseUUIDPipe,
   Post,
   Query,
 } from "@nestjs/common";
+import { and, desc, eq } from "drizzle-orm";
 import { z } from "zod";
+import { customsEntries, type Db } from "@forge-freight/db";
 import type { AuthContext } from "../auth/auth.types.js";
 import { CurrentAuth } from "../auth/current-auth.decorator.js";
+import { DB } from "../db/db.module.js";
 import { ClassificationService } from "./classification.service.js";
 import { CustomsService } from "./customs.service.js";
 
@@ -42,14 +46,43 @@ const ConfirmLineDto = z.object({
 @Controller("customs")
 export class CustomsController {
   constructor(
-    private readonly customs: CustomsService,
-    private readonly classification: ClassificationService,
+    @Inject(CustomsService) private readonly customs: CustomsService,
+    @Inject(ClassificationService) private readonly classification: ClassificationService,
+    @Inject(DB) private readonly db: Db,
   ) {}
 
   /** Classification candidates with confidence — the clearing-desk helper. */
   @Get("classify")
   classify(@Query("q") q: string) {
     return this.classification.classify(q ?? "");
+  }
+
+  /** Tenant-scoped entry list — the customs workspace landing view. */
+  @Get("entries")
+  async list(@CurrentAuth() auth: AuthContext) {
+    return this.db
+      .select()
+      .from(customsEntries)
+      .where(eq(customsEntries.tenantId, auth.tenantId))
+      .orderBy(desc(customsEntries.createdAt))
+      .limit(200);
+  }
+
+  /** Most recent entry for a shipment — the "related" link off the shipment page. */
+  @Get("entries/by-shipment/:shipmentId")
+  async byShipment(
+    @Param("shipmentId", ParseUUIDPipe) shipmentId: string,
+    @CurrentAuth() auth: AuthContext,
+  ) {
+    const [entry] = await this.db
+      .select()
+      .from(customsEntries)
+      .where(
+        and(eq(customsEntries.shipmentId, shipmentId), eq(customsEntries.tenantId, auth.tenantId)),
+      )
+      .orderBy(desc(customsEntries.createdAt))
+      .limit(1);
+    return entry ?? null;
   }
 
   @Post("entries")

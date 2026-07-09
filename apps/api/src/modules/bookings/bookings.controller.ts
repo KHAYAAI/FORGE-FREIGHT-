@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Post } from "@nestjs/common";
+import { Body, Controller, Get, Inject, Param, ParseUUIDPipe, Post } from "@nestjs/common";
 import { z } from "zod";
 import type { AuthContext } from "../auth/auth.types.js";
 import { CurrentAuth } from "../auth/current-auth.decorator.js";
@@ -10,7 +10,7 @@ const BookQuoteDto = z.object({
 
 @Controller()
 export class BookingsController {
-  constructor(private readonly bookings: BookingsService) {}
+  constructor(@Inject(BookingsService) private readonly bookings: BookingsService) {}
 
   @Post("quotes/:id/book")
   async bookQuote(

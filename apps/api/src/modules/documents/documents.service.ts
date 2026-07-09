@@ -37,7 +37,7 @@ export class DocumentsService {
   constructor(
     @Inject(DB) private readonly db: Db,
     @Inject(CONFIG) private readonly cfg: AppConfig,
-    private readonly extraction: ExtractionService,
+    @Inject(ExtractionService) private readonly extraction: ExtractionService,
   ) {}
 
   /**

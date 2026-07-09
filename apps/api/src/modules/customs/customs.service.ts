@@ -47,7 +47,7 @@ export interface EntryLineInput {
 export class CustomsService {
   constructor(
     @Inject(DB) private readonly db: Db,
-    private readonly classification: ClassificationService,
+    @Inject(ClassificationService) private readonly classification: ClassificationService,
   ) {}
 
   /** Create a DRAFT entry with classified, duty-computed lines. */

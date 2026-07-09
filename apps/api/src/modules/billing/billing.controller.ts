@@ -24,7 +24,7 @@ const PaymentDto = z.object({
 @Controller()
 export class BillingController {
   constructor(
-    private readonly billing: BillingService,
+    @Inject(BillingService) private readonly billing: BillingService,
     @Inject(DB) private readonly db: Db,
   ) {}
 

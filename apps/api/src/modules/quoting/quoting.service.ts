@@ -32,7 +32,7 @@ export interface IssueQuoteInput extends QuoteRequest {
 export class QuotingService {
   constructor(
     @Inject(DB) private readonly db: Db,
-    private readonly rates: RatesService,
+    @Inject(RatesService) private readonly rates: RatesService,
   ) {}
 
   /**

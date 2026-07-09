@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Post, Res } from "@nestjs/common";
+import { Body, Controller, Get, Inject, Param, ParseUUIDPipe, Post, Res } from "@nestjs/common";
 import type { Response } from "express";
 import { z } from "zod";
 import { CurrentAuth } from "../auth/current-auth.decorator.js";
@@ -25,8 +25,8 @@ const QuoteRequestDto = z.object({
 @Controller("quotes")
 export class QuotingController {
   constructor(
-    private readonly quoting: QuotingService,
-    private readonly pdf: QuotePdfService,
+    @Inject(QuotingService) private readonly quoting: QuotingService,
+    @Inject(QuotePdfService) private readonly pdf: QuotePdfService,
   ) {}
 
   @Post()

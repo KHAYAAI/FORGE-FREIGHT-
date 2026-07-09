@@ -1,0 +1,232 @@
+/** Domain types shared by server and client code — no server-only imports here. */
+
+export type ShipmentStatus =
+  | "BOOKED"
+  | "IN_TRANSIT"
+  | "AT_DESTINATION_PORT"
+  | "CUSTOMS"
+  | "ON_DELIVERY"
+  | "DELIVERED"
+  | "CANCELLED";
+
+export interface Shipment {
+  id: string;
+  tenantId: string;
+  reference: string;
+  bookingId: string;
+  status: ShipmentStatus;
+  origin: string;
+  destination: string;
+  createdAt: string;
+}
+
+export interface ShipmentEvent {
+  eventId: string;
+  type: string;
+  occurredAt: string;
+  payload: Record<string, unknown>;
+}
+
+export type ExceptionCode =
+  | "BOOKING_ROLLED"
+  | "CUSTOMS_QUERY"
+  | "CUSTOMS_STOPPED"
+  | "COMPLIANCE_HOLD"
+  | "CONGESTION_DELAY"
+  | "DEPARTURE_SLA_BREACH"
+  | "TRANSIT_OVERRUN"
+  | "CUSTOMS_RELEASE_SLA_BREACH";
+
+export interface ShipmentException {
+  exceptionId: string;
+  code: ExceptionCode;
+  detail: string | null;
+  raisedAt: string;
+  shipmentId: string;
+  reference: string;
+  status: ShipmentStatus;
+  origin: string;
+  destination: string;
+}
+
+export interface Quote {
+  id: string;
+  tenantId: string;
+  customerId: string;
+  status: string;
+  origin: string;
+  destination: string;
+  mode: string;
+  containerType: string | null;
+  quantity: number;
+  incoterm: string;
+  totalCents: string;
+  currency: string;
+  expiresAt: string;
+  lines?: QuoteLine[];
+}
+
+export interface QuoteLine {
+  id: string;
+  description: string;
+  amountCents: string;
+  currency: string;
+}
+
+export interface Party {
+  id: string;
+  tenantId: string;
+  name: string;
+  country: string | null;
+  address: string | null;
+  taxId: string | null;
+  email: string | null;
+  phone: string | null;
+  createdAt: string;
+  screening?: { verdict: string; [k: string]: unknown };
+}
+
+export type DocumentType =
+  | "COMMERCIAL_INVOICE"
+  | "PACKING_LIST"
+  | "BL"
+  | "SAD500"
+  | "CERTIFICATE_OF_ORIGIN"
+  | "CLEARING_INSTRUCTION"
+  | "POD"
+  | "OTHER";
+
+export type DocumentReviewStatus =
+  | "PENDING_EXTRACTION"
+  | "PENDING_REVIEW"
+  | "APPROVED"
+  | "REJECTED";
+
+export interface FreightDocument {
+  id: string;
+  tenantId: string;
+  shipmentId: string | null;
+  docType: DocumentType;
+  fileName: string;
+  extractedData: Record<string, unknown> | null;
+  extractionConfidence: number | null;
+  reviewStatus: DocumentReviewStatus;
+  reviewedBy: string | null;
+  createdAt: string;
+}
+
+export type CustomsEntryStatus =
+  | "DRAFT"
+  | "PREPARED"
+  | "SUBMITTED"
+  | "QUERY"
+  | "RELEASED"
+  | "STOPPED";
+
+export interface CustomsEntryLine {
+  id: string;
+  description: string;
+  customsValueCents: string;
+  hsCode: string | null;
+  hsConfidence: number | null;
+  dutyRateBps: number | null;
+  sacuOrigin: boolean;
+  confirmedAt: string | null;
+}
+
+export interface CustomsEntry {
+  id: string;
+  tenantId: string;
+  shipmentId: string;
+  status: CustomsEntryStatus;
+  bureauRef: string | null;
+  releaseRef: string | null;
+  dutiesTotalCents: string | null;
+  vatTotalCents: string | null;
+  currency: string;
+  createdAt: string;
+  lines?: CustomsEntryLine[];
+}
+
+export interface ClassificationCandidate {
+  hsCode: string;
+  description: string;
+  generalRateBps: number;
+  confidence: number;
+}
+
+export type InvoiceStatus = "ISSUED" | "PART_PAID" | "PAID" | "OVERDUE" | "CANCELLED";
+
+export interface Invoice {
+  id: string;
+  tenantId: string;
+  customerId: string;
+  shipmentId: string | null;
+  number: string;
+  status: InvoiceStatus;
+  totalCents: string;
+  currency: string;
+  dueDate: string;
+  createdAt: string;
+}
+
+export interface Charge {
+  id: string;
+  tenantId: string;
+  shipmentId: string;
+  kind: string;
+  amountCents: string;
+  currency: string;
+  createdAt: string;
+}
+
+export interface FinanceViews {
+  dutyFinancing: {
+    shipmentId: string;
+    amountCents: string;
+    currency: string;
+    occurredAt: string;
+  }[];
+  factoring: {
+    shipment_id: string;
+    amount_cents: string;
+    currency: string;
+    recognised_at: string;
+    factoring_clock_started_at: string | null;
+    settled_at: string | null;
+  }[];
+}
+
+export interface SystemMonitor {
+  generatedAt: string;
+  infra: {
+    database: boolean;
+    kafkaConfigured: boolean;
+    temporalConfigured: boolean;
+    outboxPollMs: number;
+  };
+  events: {
+    total: number;
+    lastHour: number;
+    outboxUnpublished: number;
+    latestRecordedAt: string | null;
+  };
+  consumers: {
+    name: string;
+    lastEventId: string | null;
+    lastRecordedAt: string | null;
+    lagMs: number | null;
+    healthy: boolean;
+  }[];
+  exceptions: {
+    total: number;
+    byCode: { code: string; n: number }[];
+  };
+  entities: {
+    shipmentsByStatus: { status: string; n: number }[];
+    documentsInReview: number;
+    customsByStatus: { status: string; n: number }[];
+    invoicesOutstanding: number;
+    parties: number;
+  };
+}

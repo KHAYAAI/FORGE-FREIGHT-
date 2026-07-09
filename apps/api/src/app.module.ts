@@ -14,6 +14,7 @@ import { ProjectorModule } from "./modules/projector/projector.module.js";
 import { QuotingModule } from "./modules/quoting/quoting.module.js";
 import { RatesModule } from "./modules/rates/rates.module.js";
 import { ShipmentsModule } from "./modules/shipments/shipments.module.js";
+import { SystemModule } from "./modules/system/system.module.js";
 import { TemporalModule } from "./modules/temporal/temporal.module.js";
 
 /** Modular monolith — keep it a monolith until it hurts. */
@@ -35,6 +36,7 @@ import { TemporalModule } from "./modules/temporal/temporal.module.js";
     BillingModule,
     CustomsModule,
     DocumentsModule,
+    SystemModule,
   ],
 })
 export class AppModule {}

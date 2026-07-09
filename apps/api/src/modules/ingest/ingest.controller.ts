@@ -60,7 +60,7 @@ export class IngestController {
   private readonly dcsa = new DcsaAdapter();
   private readonly traccar = new TraccarAdapter();
 
-  constructor(private readonly ingest: IngestService) {}
+  constructor(@Inject(IngestService) private readonly ingest: IngestService) {}
 
   @Post("dcsa")
   async ingestDcsa(@Body() body: unknown) {

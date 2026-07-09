@@ -38,8 +38,8 @@ export interface BookQuoteResult {
 export class BookingsService {
   constructor(
     @Inject(DB) private readonly db: Db,
-    private readonly temporal: TemporalService,
-    private readonly screening: ScreeningService,
+    @Inject(TemporalService) private readonly temporal: TemporalService,
+    @Inject(ScreeningService) private readonly screening: ScreeningService,
   ) {}
 
   /**

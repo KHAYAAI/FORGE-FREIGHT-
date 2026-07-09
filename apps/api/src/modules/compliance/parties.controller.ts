@@ -28,7 +28,7 @@ const CreatePartyDto = z.object({
 export class PartiesController {
   constructor(
     @Inject(DB) private readonly db: Db,
-    private readonly screening: ScreeningService,
+    @Inject(ScreeningService) private readonly screening: ScreeningService,
   ) {}
 
   @Post()
