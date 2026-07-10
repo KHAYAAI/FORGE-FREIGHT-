@@ -7,6 +7,7 @@ import {
   ParseUUIDPipe,
   Post,
 } from "@nestjs/common";
+import { Throttle } from "@nestjs/throttler";
 import { desc, eq } from "drizzle-orm";
 import { z } from "zod";
 import { parties, type Db } from "@forge-freight/db";
@@ -31,6 +32,8 @@ export class PartiesController {
     @Inject(ScreeningService) private readonly screening: ScreeningService,
   ) {}
 
+  /** Every creation triggers a yente screening call — throttle harder than reads. */
+  @Throttle({ default: { limit: 20, ttl: 60_000 } })
   @Post()
   async create(@Body() body: unknown, @CurrentAuth() auth: AuthContext) {
     const dto = CreatePartyDto.parse(body);

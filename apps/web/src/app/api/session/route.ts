@@ -13,8 +13,11 @@ export async function POST(req: Request) {
   };
   const res = NextResponse.json({ ok: true });
   res.cookies.set(SESSION_COOKIE, encodeSession(session), {
-    httpOnly: false,
+    // Everything client-side now goes through /api/proxy (server-side), so
+    // the browser never needs to read this cookie directly.
+    httpOnly: true,
     sameSite: "lax",
+    secure: process.env.NODE_ENV === "production",
     path: "/",
     maxAge: 60 * 60 * 24 * 30,
   });

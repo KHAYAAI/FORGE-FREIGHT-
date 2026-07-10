@@ -1,4 +1,6 @@
 import { Module } from "@nestjs/common";
+import { APP_GUARD } from "@nestjs/core";
+import { ThrottlerGuard, ThrottlerModule } from "@nestjs/throttler";
 import { AuthModule } from "./modules/auth/auth.module.js";
 import { BillingModule } from "./modules/billing/billing.module.js";
 import { BookingsModule } from "./modules/bookings/bookings.module.js";
@@ -20,6 +22,9 @@ import { TemporalModule } from "./modules/temporal/temporal.module.js";
 /** Modular monolith — keep it a monolith until it hurts. */
 @Module({
   imports: [
+    // Global default: 100 req/min per IP. Individual routes tighten this
+    // with @Throttle() where abuse risk or cost is higher (quotes, ingest).
+    ThrottlerModule.forRoot([{ ttl: 60_000, limit: 100 }]),
     ConfigModule,
     DbModule,
     AuthModule,
@@ -38,5 +43,6 @@ import { TemporalModule } from "./modules/temporal/temporal.module.js";
     DocumentsModule,
     SystemModule,
   ],
+  providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })
 export class AppModule {}

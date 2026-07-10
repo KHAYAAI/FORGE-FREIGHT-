@@ -10,6 +10,7 @@ import {
   UnauthorizedException,
   UseGuards,
 } from "@nestjs/common";
+import { Throttle } from "@nestjs/throttler";
 import type { Request } from "express";
 import { timingSafeEqual } from "node:crypto";
 import { CONFIG, type AppConfig } from "../../config.js";
@@ -54,8 +55,10 @@ const EDIFACT_PARTNER_MAPS: Record<string, EdifactStatusMap> = {
   },
 };
 
+/** API-key guarded, but still bounded — a leaked key shouldn't allow unbounded event floods. */
 @Controller("ingest")
 @UseGuards(IngestKeyGuard)
+@Throttle({ default: { limit: 300, ttl: 60_000 } })
 export class IngestController {
   private readonly dcsa = new DcsaAdapter();
   private readonly traccar = new TraccarAdapter();

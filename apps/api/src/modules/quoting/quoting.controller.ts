@@ -1,4 +1,5 @@
 import { Body, Controller, Get, Inject, Param, ParseUUIDPipe, Post, Res } from "@nestjs/common";
+import { Throttle } from "@nestjs/throttler";
 import type { Response } from "express";
 import { z } from "zod";
 import { CurrentAuth } from "../auth/current-auth.decorator.js";
@@ -29,6 +30,8 @@ export class QuotingController {
     @Inject(QuotePdfService) private readonly pdf: QuotePdfService,
   ) {}
 
+  /** Quoting fans out to rate lookups; keep it well below abuse thresholds. */
+  @Throttle({ default: { limit: 20, ttl: 60_000 } })
   @Post()
   async create(@Body() body: unknown, @CurrentAuth() auth: AuthContext) {
     const dto = QuoteRequestDto.parse(body);

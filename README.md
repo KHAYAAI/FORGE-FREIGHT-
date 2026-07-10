@@ -6,10 +6,11 @@ trade finance built into the same ledger that runs your payments.
 
 ## Stack
 
-Next.js + shadcn/ui · NestJS modular monolith · PostgreSQL 16 + Drizzle ·
-Temporal (shipment lifecycle) · Redpanda (event bus) · Keycloak
-(multi-tenant auth) · Novu (notifications) · yente/OpenSanctions
-(screening). TypeScript end to end. All money in integer cents.
+Next.js + Tailwind (custom component kit) · NestJS modular monolith ·
+PostgreSQL 16 + Drizzle · Temporal (shipment lifecycle) · Redpanda (event
+bus) · Keycloak (multi-tenant auth) · yente/OpenSanctions (screening) ·
+Anthropic Claude (document extraction). TypeScript end to end. All money in
+integer cents. See `LAUNCH.md` for production readiness status.
 
 ## Getting started
 
@@ -25,6 +26,12 @@ Copy `.env.example` to `.env` and adjust. In production the API verifies
 Keycloak-issued JWTs (`AUTH_MODE=jwt`, tenant from the `tenant_id` claim);
 for local development `AUTH_MODE=dev` trusts `x-dev-*` headers — the config
 loader refuses to boot dev auth in production.
+
+The web console (`pnpm --filter @forge-freight/web dev`, port 3000) has its
+own dev-mode session: visit `/login` and paste the operator tenant id from
+the seed output. It forwards `x-dev-*` headers to the API via a same-origin
+proxy — swap `apps/web/src/lib/session.ts` for real Keycloak sessions in
+production.
 
 Try the quote → PDF → booking flow (ids come from the seed output):
 
@@ -59,8 +66,9 @@ topic (keyed by shipment for per-shipment ordering).
 | `packages/ontology-bridge` | Freight event → Revenue Ontology mapper (see `docs/ontology-bridge.md`) |
 | `apps/api` | NestJS modular monolith — quoting, bookings, shipments, tracking ingest (DCSA/Traccar/EDIFACT), documents (Claude extraction), customs, compliance, billing + finance views |
 | `apps/worker` | Temporal worker — shipment lifecycle workflow (time-based exception escalation) |
-| `apps/web` | Portal — instant quote + booking, shipment timeline, ops exception kanban |
+| `apps/web` | Operator console — quoting, shipments, ops kanban, customs, documents, invoices, finance views, parties, system monitor |
 | `docs/architecture.md` | Architecture, non-negotiables, milestone plan |
+| `LAUNCH.md` | Production readiness checklist — what's done, what's deferred, operator setup steps |
 
 ## Deploying
 
@@ -81,4 +89,5 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 pnpm build       # build all packages
 pnpm test        # vitest across the workspace
 pnpm typecheck
+pnpm lint        # eslint across the workspace
 ```

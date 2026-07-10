@@ -1,8 +1,11 @@
 import { Controller, Get, Inject, Module, ServiceUnavailableException } from "@nestjs/common";
+import { SkipThrottle } from "@nestjs/throttler";
 import { sql } from "drizzle-orm";
 import type { Db } from "@forge-freight/db";
 import { DB } from "../db/db.module.js";
 
+/** Orchestrators (Docker/k8s) poll this constantly — never rate-limit it. */
+@SkipThrottle()
 @Controller("health")
 class HealthController {
   constructor(@Inject(DB) private readonly db: Db) {}

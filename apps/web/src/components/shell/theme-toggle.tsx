@@ -8,6 +8,10 @@ export function ThemeToggle() {
   useEffect(() => {
     const stored = window.localStorage.getItem("ff-theme");
     const initial = stored === "light" || stored === "dark" ? stored : "dark";
+    // Reading localStorage is impossible during the server render, so the
+    // client must sync this state once on mount — the canonical exception
+    // to "don't setState in an effect."
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setTheme(initial);
     document.documentElement.setAttribute("data-theme", initial);
   }, []);

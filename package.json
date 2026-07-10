@@ -7,13 +7,21 @@
     "node": ">=22"
   },
   "packageManager": "pnpm@10.33.0",
+  "type": "module",
   "scripts": {
     "build": "pnpm -r build",
     "test": "pnpm -r test",
     "typecheck": "pnpm -r typecheck",
-    "lint": "pnpm -r lint",
+    "lint": "eslint .",
     "dev:infra": "docker compose up -d",
     "db:migrate": "pnpm --filter @forge-freight/db migrate",
     "db:seed": "pnpm --filter @forge-freight/db seed"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.6.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "globals": "^17.7.0",
+    "typescript-eslint": "^8.63.0"
   }
 }

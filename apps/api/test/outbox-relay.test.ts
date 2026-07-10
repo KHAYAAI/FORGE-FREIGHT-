@@ -36,7 +36,7 @@ function makeDbStub(rows: OutboxRow[]) {
     }),
     update: () => ({
       set: () => ({
-        where: (cond: { queryChunks?: unknown }) => {
+        where: (_cond: { queryChunks?: unknown }) => {
           marked.push(rows.map((r) => r.eventId));
           return Promise.resolve();
         },

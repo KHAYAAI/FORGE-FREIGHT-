@@ -18,9 +18,10 @@ const plexMono = IBM_Plex_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "FORGE Freight",
+  title: { default: "FORGE Freight", template: "%s · FORGE Freight" },
   description:
     "Digital freight forwarding for African trade corridors — instant quotes, real container visibility, AI-prepared customs entries.",
+  robots: { index: false, follow: false },
 };
 
 // Applied before hydration so the stored theme paints on first frame — no
