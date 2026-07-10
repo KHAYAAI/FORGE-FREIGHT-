@@ -197,6 +197,40 @@ export interface FinanceViews {
   }[];
 }
 
+export type TenantType = "OPERATOR" | "PARTNER_AGENT" | "CUSTOMER";
+
+export interface Tenant {
+  id: string;
+  type: TenantType;
+  name: string;
+  platformFeeBps: number | null;
+}
+
+export interface Partner {
+  id: string;
+  name: string;
+  platformFeeBps: number | null;
+  createdAt: string;
+}
+
+export interface PlatformFeeCharge {
+  id: string;
+  tenantId: string;
+  shipmentId: string;
+  chargeCode: string;
+  description: string;
+  kind: string;
+  sellCents: string;
+  currency: string;
+  triggeredBy: string | null;
+  createdAt: string;
+}
+
+export interface PlatformFees {
+  charges: PlatformFeeCharge[];
+  totals: { currency: string; amountCents: number }[];
+}
+
 export interface SystemMonitor {
   generatedAt: string;
   infra: {

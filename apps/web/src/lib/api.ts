@@ -5,12 +5,15 @@ import type {
   FinanceViews,
   FreightDocument,
   Invoice,
+  Partner,
   Party,
+  PlatformFees,
   Quote,
   Shipment,
   ShipmentEvent,
   ShipmentException,
   SystemMonitor,
+  Tenant,
   Charge,
 } from "./types";
 
@@ -56,6 +59,16 @@ export async function apiGet<T>(path: string): Promise<T> {
 export async function apiPost<T>(path: string, body?: unknown): Promise<T> {
   const res = await fetch(`${API_URL}${path}`, {
     method: "POST",
+    headers: await headers({ "content-type": "application/json" }),
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  if (!res.ok) throw new ApiError(path, res.status, await res.text());
+  return res.json() as Promise<T>;
+}
+
+export async function apiPatch<T>(path: string, body?: unknown): Promise<T> {
+  const res = await fetch(`${API_URL}${path}`, {
+    method: "PATCH",
     headers: await headers({ "content-type": "application/json" }),
     body: body === undefined ? undefined : JSON.stringify(body),
   });
@@ -162,7 +175,16 @@ export const api = {
     body: { amountCents: number; currency: string; paymentRef: string },
   ) => apiPost<Invoice>(`/invoices/${invoiceId}/payments`, body),
   financeViews: () => apiGet<FinanceViews>("/finance/views"),
+  platformFees: () => apiGet<PlatformFees>("/billing/platform-fees"),
 
   // System
   systemMonitor: () => apiGet<SystemMonitor>("/system/monitor"),
+
+  // Tenants (M10)
+  getMyTenant: () => apiGet<Tenant | null>("/tenants/me"),
+  listPartners: () => apiGet<Partner[]>("/tenants/partners"),
+  createPartner: (body: { name: string; platformFeeBps: number }) =>
+    apiPost<Partner>("/tenants/partners", body),
+  updatePartnerFeeRate: (id: string, platformFeeBps: number) =>
+    apiPatch<Partner>(`/tenants/partners/${id}/fee-rate`, { platformFeeBps }),
 };

@@ -54,10 +54,14 @@ export class IngestService {
         continue;
       }
 
-      const payload =
-        emission.match.by === "traccarDevice"
-          ? { ...(emission.payload as Record<string, unknown>), legId: resolved.legId }
-          : emission.payload;
+      // Position-ping events carry a legId the adapter can't know in
+      // advance — filled in here from the resolved match, same as Traccar.
+      const needsLegId =
+        emission.definition.type === "road.position_reported" ||
+        emission.definition.type === "vessel.position_reported";
+      const payload = needsLegId
+        ? { ...(emission.payload as Record<string, unknown>), legId: resolved.legId }
+        : emission.payload;
 
       const event = makeEvent({
         definition: emission.definition,
@@ -109,7 +113,7 @@ export class IngestService {
       }
       case "vesselImo": {
         const [row] = await this.db
-          .select({ shipmentId: shipments.id, tenantId: shipments.tenantId })
+          .select({ shipmentId: shipments.id, tenantId: shipments.tenantId, legId: legs.id })
           .from(legs)
           .innerJoin(shipments, eq(legs.shipmentId, shipments.id))
           .where(

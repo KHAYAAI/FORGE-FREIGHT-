@@ -80,7 +80,7 @@ describe("entry state machine", () => {
 });
 
 describe("HS classification", () => {
-  const service = new ClassificationService();
+  const service = new ClassificationService({ TARIFF_CSV_PATH: "" } as never);
 
   it("finds the right heading for a clear description", () => {
     const [top] = service.classify("2000 cotton t-shirts, knitted");

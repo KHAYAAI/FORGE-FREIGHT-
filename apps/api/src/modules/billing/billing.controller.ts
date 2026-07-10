@@ -83,4 +83,35 @@ export class BillingController {
   async finance(@CurrentAuth() auth: AuthContext) {
     return this.billing.financeViews(auth.tenantId);
   }
+
+  /**
+   * M10: what this tenant owes the operator in platform fees — every
+   * FEE-kind charge accrued against it, tenant-scoped like everything else
+   * here so a partner only ever sees its own fees, never another partner's.
+   */
+  @Get("billing/platform-fees")
+  async platformFees(@CurrentAuth() auth: AuthContext) {
+    const rows = await this.db
+      .select()
+      .from(charges)
+      .where(and(eq(charges.tenantId, auth.tenantId), eq(charges.kind, "FEE")))
+      .orderBy(desc(charges.createdAt))
+      .limit(500);
+
+    const totalsByCurrency = new Map<string, number>();
+    for (const row of rows) {
+      totalsByCurrency.set(
+        row.currency,
+        (totalsByCurrency.get(row.currency) ?? 0) + row.sellCents,
+      );
+    }
+
+    return {
+      charges: rows,
+      totals: Array.from(totalsByCurrency.entries()).map(([currency, amountCents]) => ({
+        currency,
+        amountCents,
+      })),
+    };
+  }
 }

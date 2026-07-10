@@ -1,7 +1,11 @@
+import type { TenantType } from "@/lib/types";
+
 export interface NavItem {
   href: string;
   label: string;
   group: string;
+  /** Omit to show for every tenant type. */
+  visibleTo?: TenantType[];
 }
 
 export const NAV_ITEMS: NavItem[] = [
@@ -18,4 +22,14 @@ export const NAV_ITEMS: NavItem[] = [
 
   { href: "/invoices", label: "Invoices", group: "Finance" },
   { href: "/finance", label: "Finance Views", group: "Finance" },
+  // Platform fees only mean something for a partner tenant — an operator
+  // sees what partners owe via the Partners screen instead.
+  { href: "/platform-fees", label: "Platform Fees", group: "Finance", visibleTo: ["PARTNER_AGENT"] },
+
+  // M10: franchise layer, operator-only.
+  { href: "/partners", label: "Partners", group: "Admin", visibleTo: ["OPERATOR"] },
 ];
+
+export function visibleNavItems(tenantType: TenantType | undefined): NavItem[] {
+  return NAV_ITEMS.filter((item) => !item.visibleTo || (tenantType && item.visibleTo.includes(tenantType)));
+}

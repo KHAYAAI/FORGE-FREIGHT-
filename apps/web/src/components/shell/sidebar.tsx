@@ -3,11 +3,12 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/cn";
-import { NAV_ITEMS } from "./nav-items";
+import type { TenantType } from "@/lib/types";
+import { visibleNavItems, type NavItem } from "./nav-items";
 
-function groupItems() {
-  const groups = new Map<string, typeof NAV_ITEMS>();
-  for (const item of NAV_ITEMS) {
+function groupItems(items: NavItem[]) {
+  const groups = new Map<string, NavItem[]>();
+  for (const item of items) {
     const list = groups.get(item.group) ?? [];
     list.push(item);
     groups.set(item.group, list);
@@ -15,9 +16,9 @@ function groupItems() {
   return groups;
 }
 
-export function Sidebar() {
+export function Sidebar({ tenantType }: { tenantType?: TenantType }) {
   const pathname = usePathname();
-  const groups = groupItems();
+  const groups = groupItems(visibleNavItems(tenantType));
 
   return (
     <aside className="flex h-screen w-56 shrink-0 flex-col border-r border-hairline bg-surface">

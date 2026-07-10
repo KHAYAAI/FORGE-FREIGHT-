@@ -5,6 +5,7 @@ import {
   charges,
   quoteLines,
   shipments,
+  tenants,
   type Db,
 } from "@forge-freight/db";
 import { ChargeAccrued, makeEvent } from "@forge-freight/events";
@@ -14,7 +15,8 @@ import type { EventHandler, StoredEvent } from "./event-dispatcher.service.js";
 /**
  * Charge accrual from operational events:
  * - vessel.departed  → accrue the quoted freight + surcharge lines (sell AND
- *   buy — margin visibility from day one).
+ *   buy — margin visibility from day one), then — PARTNER_AGENT tenants
+ *   only — the platform fee on top (M10: franchise layer).
  * - entry.released   → accrue duties+VAT as a pass-through DISBURSEMENT.
  * Each accrual emits charge.accrued, which the ledger sink turns into an
  * obligation for the Revenue Ontology.
@@ -70,8 +72,18 @@ export class BillingAccrual implements EventHandler {
       .from(quoteLines)
       .where(eq(quoteLines.quoteId, booking.quoteId));
 
+    // Sell total by currency, for the platform fee below — computed while
+    // accruing the quoted lines so a mixed-currency quote fees each currency
+    // on its own total rather than mixing them.
+    const sellTotalsByCurrency = new Map<string, number>();
+
     for (const line of lines) {
       const chargeId = randomUUID();
+      const sellCents = line.sellCents * line.quantity;
+      sellTotalsByCurrency.set(
+        line.currency,
+        (sellTotalsByCurrency.get(line.currency) ?? 0) + sellCents,
+      );
       await db.transaction(async (tx) => {
         await tx.insert(charges).values({
           id: chargeId,
@@ -81,7 +93,7 @@ export class BillingAccrual implements EventHandler {
           description: line.description,
           kind: line.chargeCode === "FRT" ? "FREIGHT" : "SURCHARGE",
           buyCents: line.buyCents * line.quantity,
-          sellCents: line.sellCents * line.quantity,
+          sellCents,
           currency: line.currency,
           triggeredBy: "vessel.departed",
         });
@@ -98,10 +110,66 @@ export class BillingAccrual implements EventHandler {
               description: line.description,
               kind: line.chargeCode === "FRT" ? "FREIGHT" : "SURCHARGE",
               buy: { amountCents: line.buyCents * line.quantity, currency: line.currency },
-              sell: {
-                amountCents: line.sellCents * line.quantity,
-                currency: line.currency,
-              },
+              sell: { amountCents: sellCents, currency: line.currency },
+              triggeredBy: "vessel.departed",
+            },
+          }),
+        );
+      });
+    }
+
+    await this.accruePlatformFee(shipment.tenantId, shipmentId, sellTotalsByCurrency, db);
+  }
+
+  /**
+   * M10: PARTNER_AGENT tenants pay the operator a platform fee on the
+   * freight they book, set per-partner via tenants.platform_fee_bps.
+   * OPERATOR and CUSTOMER tenants never accrue this — no rate means no fee.
+   */
+  private async accruePlatformFee(
+    tenantId: string,
+    shipmentId: string,
+    sellTotalsByCurrency: Map<string, number>,
+    db: Db,
+  ): Promise<void> {
+    const [tenant] = await db
+      .select({ type: tenants.type, platformFeeBps: tenants.platformFeeBps })
+      .from(tenants)
+      .where(eq(tenants.id, tenantId));
+    if (!tenant || tenant.type !== "PARTNER_AGENT" || !tenant.platformFeeBps) return;
+
+    for (const [currency, sellCents] of sellTotalsByCurrency) {
+      const feeCents = Math.round((sellCents * tenant.platformFeeBps) / 10_000);
+      if (feeCents <= 0) continue;
+
+      const chargeId = randomUUID();
+      await db.transaction(async (tx) => {
+        await tx.insert(charges).values({
+          id: chargeId,
+          tenantId,
+          shipmentId,
+          chargeCode: "PLATFORM_FEE",
+          description: `Platform fee (${tenant.platformFeeBps! / 100}% of freight)`,
+          kind: "FEE",
+          buyCents: null,
+          sellCents: feeCents,
+          currency,
+          triggeredBy: "vessel.departed",
+        });
+        await appendEvent(
+          tx,
+          makeEvent({
+            definition: ChargeAccrued,
+            tenantId,
+            actor: { kind: "SYSTEM", id: "billing-accrual" },
+            shipmentId,
+            payload: {
+              chargeId,
+              chargeCode: "PLATFORM_FEE",
+              description: `Platform fee (${tenant.platformFeeBps! / 100}% of freight)`,
+              kind: "FEE",
+              buy: null,
+              sell: { amountCents: feeCents, currency },
               triggeredBy: "vessel.departed",
             },
           }),

@@ -6,6 +6,7 @@ import type {
   FinanceViews,
   FreightDocument,
   Invoice,
+  Partner,
   Party,
   Quote,
   Shipment,
@@ -22,6 +23,16 @@ async function get<T>(path: string): Promise<T> {
 async function post<T>(path: string, body?: unknown): Promise<T> {
   const res = await fetch(`/api/proxy${path}`, {
     method: "POST",
+    headers: { "content-type": "application/json" },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json() as Promise<T>;
+}
+
+async function patch<T>(path: string, body?: unknown): Promise<T> {
+  const res = await fetch(`/api/proxy${path}`, {
+    method: "PATCH",
     headers: { "content-type": "application/json" },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
@@ -83,4 +94,9 @@ export const clientApi = {
   recordPayment: (invoiceId: string, body: { amountCents: number; currency: string; paymentRef: string }) =>
     post<Invoice>(`/invoices/${invoiceId}/payments`, body),
   financeViews: () => get<FinanceViews>("/finance/views"),
+
+  createPartner: (body: { name: string; platformFeeBps: number }) =>
+    post<Partner>("/tenants/partners", body),
+  updatePartnerFeeRate: (id: string, platformFeeBps: number) =>
+    patch<Partner>(`/tenants/partners/${id}/fee-rate`, { platformFeeBps }),
 };

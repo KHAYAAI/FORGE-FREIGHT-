@@ -50,27 +50,30 @@ apps/
    Temporal workflow (apps/worker) for time-based escalation. ✅
 4. **Tracking ingest** — adapter plugin interface (canonical events only,
    sourceRef idempotency): DCSA T&T, Traccar webhooks, EDIFACT IFTSTA parser
-   with per-partner status maps. ✅ (AIS/aisstream listener: next)
+   with per-partner status maps, AIS vessel positions (aisstream.io — MMSI
+   learned from ShipStaticData, matched to legs by IMO). ✅
 5. **Documents** — multipart upload → Claude structured extraction per doc
    type (zod schemas, self-reported confidence) → review queue; degrades to
    manual review without an API key. ✅
 6. **Customs** — SA duty/VAT calculator (ATV formula), HS classification
    with confidence + mandatory human confirm below threshold, entry state
    machine (DRAFT→PREPARED→SUBMITTED→QUERY/RELEASED/STOPPED), bureau-ready
-   payload. ✅ (tariff dataset is a starter extract — load the full SARS book
-   before classifying beyond it)
+   payload. ✅ (tariff dataset is a ~90-heading reference extract with a CSV
+   loader for the real gazetted schedule — see tariff-data.ts)
 7. **Compliance** — yente screening on party creation and re-screen at
    booking; HIT blocks the booking and places a compliance hold; screening
    infrastructure failure fails closed to REVIEW. ✅
 8. **Billing & ForgePay bridge** — vessel.departed accrues quoted charges,
    entry.released accrues the duty/VAT disbursement, invoice + payment
    endpoints, ledger sink feeding ledger_events (Revenue Ontology), duty
-   financing/factoring views at GET /finance/views. ✅
+   financing/factoring views at GET /finance/views, Novu milestone
+   notifications (WhatsApp/SMS/email per the workflow's own config). ✅
 9. **Customer portal** — quote form with one-click booking, shipment list,
-   event timeline, ops exception kanban. ✅ (WhatsApp share + Novu next)
-10. **Partner console** — scoped multi-tenant ops tooling, platform fees.
-    (Tenant scoping is enforced everywhere; the PARTNER_AGENT-specific
-    console is next.)
+   event timeline, ops exception kanban. ✅
+10. **Partner console** — `tenants.platform_fee_bps`, operator-only
+    tenant/partner administration (`/tenants/partners`), automatic platform
+    fee accrual on partner freight, partner-facing fees-owed view. ✅
+    (partners still can't self-serve their own rate cards — see LAUNCH.md)
 
 ## Out of scope (deliberately)
 

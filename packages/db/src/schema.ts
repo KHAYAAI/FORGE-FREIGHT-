@@ -45,6 +45,8 @@ export const tenants = pgTable("tenants", {
   name: text("name").notNull(),
   /** Keycloak organisation id. */
   keycloakOrgId: text("keycloak_org_id"),
+  /** PARTNER_AGENT only: platform fee the operator charges on shipment freight, basis points. */
+  platformFeeBps: integer("platform_fee_bps"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 

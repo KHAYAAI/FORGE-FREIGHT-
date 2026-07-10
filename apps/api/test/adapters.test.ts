@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { AisAdapter } from "../src/modules/ingest/ais.adapter.js";
 import { DcsaAdapter } from "../src/modules/ingest/dcsa.adapter.js";
 import { EdifactIftstaAdapter } from "../src/modules/ingest/edifact.adapter.js";
 import { extractIftsta, parseSegments } from "../src/modules/ingest/edifact.js";
@@ -74,6 +75,61 @@ describe("Traccar adapter", () => {
     expect(emission!.match).toEqual({ by: "traccarDevice", deviceId: "truck-042" });
     expect((emission!.payload as { speedKph: number }).speedKph).toBeCloseTo(74.1);
     expect(emission!.sourceRef).toBe("traccar:991");
+  });
+});
+
+describe("AIS adapter", () => {
+  it("drops a position report until static data teaches it the MMSI's IMO", () => {
+    const ais = new AisAdapter();
+    ais.setTrackedVessels(["9321483"]);
+    const dropped = ais.parse({
+      MessageType: "PositionReport",
+      MetaData: { MMSI: 636012345, time_utc: "2026-08-20 06:30:00.000000000" },
+      Message: { PositionReport: { Latitude: -33.9, Longitude: 18.4, Sog: 14.2, TrueHeading: 90 } },
+    });
+    expect(dropped).toEqual([]);
+  });
+
+  it("learns MMSI->IMO from ShipStaticData and then emits matched positions", () => {
+    const ais = new AisAdapter();
+    ais.setTrackedVessels(["9321483"]);
+
+    const staticEmissions = ais.parse({
+      MessageType: "ShipStaticData",
+      MetaData: { MMSI: 636012345 },
+      Message: { ShipStaticData: { ImoNumber: 9321483 } },
+    });
+    expect(staticEmissions).toEqual([]);
+
+    const [emission] = ais.parse({
+      MessageType: "PositionReport",
+      MetaData: { MMSI: 636012345, time_utc: "2026-08-20 06:30:00.000000000" },
+      Message: { PositionReport: { Latitude: -33.9, Longitude: 18.4, Sog: 14.2, TrueHeading: 90 } },
+    });
+    expect(emission!.definition.type).toBe("vessel.position_reported");
+    expect(emission!.match).toEqual({ by: "vesselImo", vesselImo: "9321483" });
+    expect((emission!.payload as { lat: number }).lat).toBe(-33.9);
+    expect(emission!.sourceRef).toBe("ais:636012345:2026-08-20T06:30");
+  });
+
+  it("ignores positions for vessels outside the tracked set", () => {
+    const ais = new AisAdapter();
+    ais.setTrackedVessels(["9999999"]); // not the vessel below
+    ais.parse({
+      MessageType: "ShipStaticData",
+      MetaData: { MMSI: 636012345 },
+      Message: { ShipStaticData: { ImoNumber: 9321483 } },
+    });
+    const emissions = ais.parse({
+      MessageType: "PositionReport",
+      MetaData: { MMSI: 636012345 },
+      Message: { PositionReport: { Latitude: -33.9, Longitude: 18.4 } },
+    });
+    expect(emissions).toEqual([]);
+  });
+
+  it("ignores messages it doesn't recognise", () => {
+    expect(new AisAdapter().parse({ MessageType: "StandardClassBPositionReport" })).toEqual([]);
   });
 });
 

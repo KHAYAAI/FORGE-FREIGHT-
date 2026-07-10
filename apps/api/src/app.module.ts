@@ -18,6 +18,7 @@ import { RatesModule } from "./modules/rates/rates.module.js";
 import { ShipmentsModule } from "./modules/shipments/shipments.module.js";
 import { SystemModule } from "./modules/system/system.module.js";
 import { TemporalModule } from "./modules/temporal/temporal.module.js";
+import { TenantsModule } from "./modules/tenants/tenants.module.js";
 
 /** Modular monolith — keep it a monolith until it hurts. */
 @Module({
@@ -42,6 +43,7 @@ import { TemporalModule } from "./modules/temporal/temporal.module.js";
     CustomsModule,
     DocumentsModule,
     SystemModule,
+    TenantsModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })

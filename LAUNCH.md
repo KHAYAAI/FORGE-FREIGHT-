@@ -47,13 +47,51 @@ live dashboard.
   cron-ready.
 - Web app: error boundary, 404 page, route-level loading skeleton, favicon.
 
-**Verified live** (this session): stood up Postgres + the API + the web app
-locally, logged in via the dev session, exercised all 12 routes against real
-seeded data, confirmed a genuine pre-existing bug — `tsx`'s esbuild
-transform drops `emitDecoratorMetadata`, silently breaking NestJS DI for any
-constructor parameter without an explicit `@Inject()` — and fixed it across
-every affected controller/service (documents, billing, customs, compliance,
-bookings, quoting, ingest). 68/68 tests pass, both typechecks clean, `pnpm
+**Product surface, round two** (M10 + the three integrations previously
+listed as deferred — now built, not stubbed):
+- **M10 Partner console**: `tenants.platform_fee_bps` (basis points),
+  operator-only `TenantsController` (`/tenants/partners` list/create,
+  `PATCH .../fee-rate`, `/tenants/me`), `BillingAccrual` charges a `FEE`-kind
+  line automatically on `vessel.departed` for any `PARTNER_AGENT` tenant with
+  a rate set, `GET /billing/platform-fees` for a partner to see what it owes.
+  Web: `/partners` (operator admin — create partners, edit fee rates inline)
+  and `/platform-fees` (partner-facing), both gated by tenant type in the
+  nav, not just by the API's own 403.
+- **AIS vessel tracking**: new `vessel.position_reported` catalogue event,
+  `AisAdapter` (learns the MMSI→IMO mapping from `ShipStaticData` messages,
+  since AIS position reports are MMSI-keyed and `legs.vessel_imo` is
+  IMO-keyed — a real protocol detail, not a shortcut), `AisListenerService`
+  maintaining a `wss://stream.aisstream.io` subscription and refreshing the
+  tracked-vessel set from active ocean legs every `AIS_VESSEL_REFRESH_MS`.
+  Disabled (logged, not failed) without `AISSTREAM_API_KEY` — same posture
+  as every other optional integration here.
+- **Novu milestone notifications**: `NotificationsService` posts to Novu's
+  `/v1/events/trigger` REST endpoint directly (not the SDK — fewer moving
+  parts, the endpoint's contract has outlived several SDK majors) on
+  `vessel.departed`, `vessel.arrived`, `entry.released`, `pod.confirmed`.
+  Which channel actually fires (WhatsApp/SMS/email) is the Novu workflow's
+  own configuration, not this codebase's. Disabled without `NOVU_API_KEY`.
+- **Tariff book**: grown from 15 to ~90 headings across the chapters that
+  actually move on these corridors (electronics, textiles/apparel, footwear,
+  vehicles/parts, machinery, foodstuffs, furniture, base metals), plus a CSV
+  loader (`TARIFF_CSV_PATH`) so the real gazetted schedule can override the
+  built-in extract line-by-line without a code change. Still not a verbatim
+  copy of SARS Schedule 1 — see the provenance note in
+  `apps/api/src/modules/customs/tariff-data.ts` before relying on it for a
+  real entry.
+
+**Verified live**: stood up Postgres + the API + the web app locally, logged
+in via the dev session, exercised every route against real seeded data,
+confirmed a genuine pre-existing bug — `tsx`'s esbuild transform drops
+`emitDecoratorMetadata`, silently breaking NestJS DI for any constructor
+parameter without an explicit `@Inject()` — and fixed it across every
+affected controller/service (documents, billing, customs, compliance,
+bookings, quoting, ingest). For M10 specifically: created a partner tenant
+as operator, confirmed a non-operator tenant gets a 403 trying to do the
+same, booked a shipment under the partner, fired a DCSA departure webhook,
+and watched the correct platform fee (5% of $7,700.00 freight = $385.00)
+accrue automatically and show up on both `/billing/platform-fees` and the
+`/platform-fees` screen. 77/77 tests pass, both typechecks clean, `pnpm
 lint` clean, production build succeeds.
 
 ## Must do before going live (operator action, not code)
@@ -86,25 +124,37 @@ provision on its own:
    replicas (local disk isn't shared across containers).
 7. **DNS + CORS**: set `CORS_ORIGINS` and `PORTAL_ORIGIN` to the real
    production domain before cutover — they default to `localhost`.
+8. **Optional integrations, if you want them live at launch**: `AISSTREAM_API_KEY`
+   (aisstream.io account) for live vessel positions, `NOVU_API_KEY` +
+   a workflow named to match `NOVU_WORKFLOW_ID` configured in the Novu
+   dashboard with the WhatsApp/SMS/email channels you actually want, and
+   `TARIFF_CSV_PATH` pointing at the real SARS Schedule 1 if you have a
+   licensed data feed for it. All three are genuinely optional — the
+   platform is fully functional and degrades gracefully without any of
+   them, exactly like `YENTE_URL`/`ANTHROPIC_API_KEY` already do.
 
 ## Deliberately deferred (not launch blockers)
 
 Called out explicitly so nobody mistakes "not built yet" for "forgotten":
 
-- **M10 Partner console**: `PARTNER_AGENT` tenant type exists in the schema
-  and is enforced at the query level, but there's no partner-scoped UI or
-  platform-fee logic yet. Needed before onboarding franchise partners, not
-  before an operator-only launch.
-- **AIS vessel listener**: DCSA T&T covers actual port/vessel events; live
-  AIS position streaming (aisstream integration) is not wired.
-- **Novu + WhatsApp notifications**: no customer-facing SMS/WhatsApp
-  milestone alerts yet. The event stream that would drive them already
-  exists.
-- **Full SARS tariff book**: HS classification runs against a ~15-heading
-  starter extract, not the complete South African tariff schedule. Every
-  classification still carries a confidence score and low-confidence codes
-  require human confirmation, so this is a coverage gap, not a correctness
-  one.
+- **Rate cards for partner tenants**: `BillingAccrual` will charge a
+  partner's platform fee correctly once it books freight, but partners
+  currently can't self-serve their own rate cards — there's still no write
+  endpoint for `rate_cards` (`RatesService` is read-only, seed-populated).
+  Onboarding a partner today means an operator inserting rate cards
+  directly, same as it's always been for the operator tenant itself.
+- **SARS tariff book is a reference extract, not the gazette**: ~90 headings
+  covering the common corridor commodities, not the full Schedule 1 with
+  every subheading, specific/formula duty, anti-dumping margin, or
+  AfCFTA/SACU preferential rate. `TARIFF_CSV_PATH` exists precisely so the
+  real schedule can be loaded without a code change — see
+  `tariff-data.ts` for the full provenance note.
+- **AIS listener has no automated test of the live WebSocket connection**:
+  the parsing logic (`AisAdapter`) is unit-tested; the connection/reconnect
+  logic (`AisListenerService`) is verified by code review and a clean boot
+  with the feature disabled, not by an actual `aisstream.io` session — that
+  requires a real API key and open egress this environment doesn't have.
+  Confirm connectivity against a real key before relying on it in production.
 - **Structured/shipped logging** (e.g., JSON logs to a log aggregator): the
   API logs to stdout via NestJS's default logger. Fine for a single-host
   launch with `docker logs`; wire a real sink before scaling to multiple

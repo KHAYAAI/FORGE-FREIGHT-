@@ -9,8 +9,10 @@ trade finance built into the same ledger that runs your payments.
 Next.js + Tailwind (custom component kit) · NestJS modular monolith ·
 PostgreSQL 16 + Drizzle · Temporal (shipment lifecycle) · Redpanda (event
 bus) · Keycloak (multi-tenant auth) · yente/OpenSanctions (screening) ·
-Anthropic Claude (document extraction). TypeScript end to end. All money in
-integer cents. See `LAUNCH.md` for production readiness status.
+Anthropic Claude (document extraction) · aisstream.io (AIS vessel
+positions) · Novu (WhatsApp/SMS/email milestone notifications). TypeScript
+end to end. All money in integer cents. See `LAUNCH.md` for production
+readiness status.
 
 ## Getting started
 

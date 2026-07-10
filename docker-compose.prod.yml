@@ -6,6 +6,10 @@
 # Required environment (see .env.example): AUTH_ISSUER, INGEST_API_KEY,
 # YENTE_URL, KAFKA_BROKERS, TEMPORAL_ADDRESS, ANTHROPIC_API_KEY.
 # Put a TLS-terminating reverse proxy (Caddy/Traefik) in front of api + web.
+#
+# TARIFF_CSV_PATH, if set, must point somewhere inside the api container —
+# bind-mount your real tariff CSV in (e.g. `- ./tariff.csv:/data/tariff.csv:ro`
+# under api.volumes) and set TARIFF_CSV_PATH=/data/tariff.csv.
 
 services:
   api:
@@ -26,6 +30,10 @@ services:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       CORS_ORIGINS: ${PORTAL_ORIGIN:-http://localhost:3000}
       DOC_STORAGE_DIR: /data/documents
+      TARIFF_CSV_PATH: ${TARIFF_CSV_PATH:-}
+      AISSTREAM_API_KEY: ${AISSTREAM_API_KEY:-}
+      NOVU_API_KEY: ${NOVU_API_KEY:-}
+      NOVU_WORKFLOW_ID: ${NOVU_WORKFLOW_ID:-shipment-milestone}
     volumes:
       - documents:/data/documents
     depends_on:

@@ -1,5 +1,7 @@
-import { Injectable } from "@nestjs/common";
-import { TARIFF_EXTRACT, type TariffLine } from "./tariff-data.js";
+import { Inject, Injectable } from "@nestjs/common";
+import { CONFIG, type AppConfig } from "../../config.js";
+import { loadTariffBook } from "./tariff-loader.js";
+import type { TariffLine } from "./tariff-data.js";
 
 export interface ClassificationCandidate {
   hsCode: string;
@@ -16,9 +18,19 @@ export const CLASSIFICATION_CONFIRM_THRESHOLD = 0.75;
  * retrieval + LLM (with cited headings) as the dataset grows. Whatever the
  * method, the contract holds: candidates carry confidence, and low
  * confidence forces a human to confirm before the entry can be prepared.
+ *
+ * The tariff book itself (loadTariffBook) is the built-in reference extract,
+ * optionally overridden by a real gazetted-schedule CSV via
+ * TARIFF_CSV_PATH — see tariff-data.ts for provenance and limits.
  */
 @Injectable()
 export class ClassificationService {
+  private readonly book: TariffLine[];
+
+  constructor(@Inject(CONFIG) cfg: AppConfig) {
+    this.book = loadTariffBook(cfg.TARIFF_CSV_PATH || null);
+  }
+
   classify(description: string, topN = 3): ClassificationCandidate[] {
     const words = description
       .toLowerCase()
@@ -26,10 +38,8 @@ export class ClassificationService {
       .filter((w) => w.length > 2);
     if (words.length === 0) return [];
 
-    const scored = TARIFF_EXTRACT.map((line) => ({
-      line,
-      score: this.score(words, line),
-    }))
+    const scored = this.book
+      .map((line) => ({ line, score: this.score(words, line) }))
       .filter((s) => s.score > 0)
       .sort((a, b) => b.score - a.score)
       .slice(0, topN);

@@ -41,11 +41,23 @@ const ConfigSchema = z
     EXTRACTION_REVIEW_THRESHOLD: z.coerce.number().min(0).max(1).default(0.85),
     DOC_STORAGE_DIR: z.string().default("./storage/documents"),
 
+    /** Path to a CSV overlaying the built-in tariff extract. Empty = extract only. */
+    TARIFF_CSV_PATH: z.string().default(""),
+
     /** Comma-separated brokers, e.g. localhost:19092. Empty = relay disabled. */
     KAFKA_BROKERS: z.string().default(""),
     KAFKA_TOPIC_EVENTS: z.string().default("freight.events"),
     OUTBOX_POLL_MS: z.coerce.number().int().min(100).default(500),
     OUTBOX_BATCH_SIZE: z.coerce.number().int().min(1).max(1000).default(100),
+
+    /** aisstream.io API key. Empty = AIS vessel position listener disabled. */
+    AISSTREAM_API_KEY: z.string().default(""),
+    /** How often to refresh the set of vessel IMOs to subscribe to. */
+    AIS_VESSEL_REFRESH_MS: z.coerce.number().int().min(10_000).default(60_000),
+
+    /** Novu API key. Empty = milestone notifications disabled (logged only). */
+    NOVU_API_KEY: z.string().default(""),
+    NOVU_WORKFLOW_ID: z.string().default("shipment-milestone"),
   })
   .superRefine((cfg, ctx) => {
     if (cfg.NODE_ENV === "production") {

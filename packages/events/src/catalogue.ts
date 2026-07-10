@@ -212,6 +212,22 @@ export const RoadPositionReported = defineEvent({
   }),
 });
 
+export const VesselPositionReported = defineEvent({
+  type: "vessel.position_reported",
+  version: 1,
+  financial: false,
+  description:
+    "AIS position ping for an ocean leg (aisstream.io). Distinct from vessel.departed/arrived, which are DCSA/EDIFACT milestones — this is continuous where-is-it visibility between them.",
+  schema: z.object({
+    legId: z.string().uuid(),
+    vesselImo: ImoNumber,
+    lat: z.number().min(-90).max(90),
+    lon: z.number().min(-180).max(180),
+    speedKnots: z.number().nonnegative().nullable(),
+    heading: z.number().min(0).max(359).nullable(),
+  }),
+});
+
 export const PodConfirmed = defineEvent({
   type: "pod.confirmed",
   version: 1,
@@ -473,6 +489,7 @@ export const catalogue = [
   ContainerDischarged,
   ContainerGatedOut,
   RoadPositionReported,
+  VesselPositionReported,
   PodConfirmed,
   ShipmentExceptionRaised,
   ShipmentExceptionCleared,
