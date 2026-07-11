@@ -26,8 +26,12 @@ export const NAV_ITEMS: NavItem[] = [
   // sees what partners owe via the Partners screen instead.
   { href: "/platform-fees", label: "Platform Fees", group: "Finance", visibleTo: ["PARTNER_AGENT"] },
 
-  // M10: franchise layer, operator-only.
-  { href: "/partners", label: "Partners", group: "Admin", visibleTo: ["OPERATOR"] },
+  // M10: the infrastructure business — other operators running on our
+  // rails, not our own shipments. Deliberately its own nav group so the
+  // two business models (forwarder vs. platform) read as distinct in the
+  // product, not just in a strategy doc.
+  { href: "/partners", label: "Partners", group: "Infrastructure", visibleTo: ["OPERATOR"] },
+  { href: "/network", label: "Network Overview", group: "Infrastructure", visibleTo: ["OPERATOR"] },
 ];
 
 export function visibleNavItems(tenantType: TenantType | undefined): NavItem[] {

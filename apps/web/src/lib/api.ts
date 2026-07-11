@@ -5,6 +5,7 @@ import type {
   FinanceViews,
   FreightDocument,
   Invoice,
+  NetworkOverview,
   Partner,
   Party,
   PlatformFees,
@@ -187,4 +188,5 @@ export const api = {
     apiPost<Partner>("/tenants/partners", body),
   updatePartnerFeeRate: (id: string, platformFeeBps: number) =>
     apiPatch<Partner>(`/tenants/partners/${id}/fee-rate`, { platformFeeBps }),
+  getNetwork: () => apiGet<NetworkOverview>("/tenants/network"),
 };

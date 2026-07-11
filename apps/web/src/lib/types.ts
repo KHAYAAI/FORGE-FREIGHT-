@@ -211,6 +211,16 @@ export interface Partner {
   name: string;
   platformFeeBps: number | null;
   createdAt: string;
+  shipmentCount: number;
+  feeRevenue: { currency: string; amountCents: number }[];
+}
+
+export interface NetworkOverview {
+  tenantsByType: { type: TenantType; n: number }[];
+  totalShipments: number;
+  corridorVolume: { origin: string; destination: string; n: number }[];
+  shipmentsByStatus: { status: ShipmentStatus; n: number }[];
+  platformFeeRevenue: { currency: string; totalCents: number }[];
 }
 
 export interface PlatformFeeCharge {

@@ -5,19 +5,20 @@ import { StatTile } from "@/components/ui/stat-tile";
 import { Panel, PanelHeader } from "@/components/ui/card";
 import { Table, THead, TR, TH, TD, Mono } from "@/components/ui/table";
 import { ShipmentStatusTag, Tag, exceptionSeverity } from "@/components/ui/badge";
-import { EmptyState, ErrorState } from "@/components/ui/empty-state";
+import { EmptyState, ErrorState, InfoBanner } from "@/components/ui/empty-state";
 
 export const dynamic = "force-dynamic";
 
 export default async function DashboardPage() {
   let error: string | null = null;
-  const [monitor, shipments, exceptions] = await Promise.all([
+  const [monitor, shipments, exceptions, tenant] = await Promise.all([
     api.systemMonitor().catch((e) => {
       error = e instanceof Error ? e.message : String(e);
       return null;
     }),
     api.listShipments().catch(() => []),
     api.openExceptions().catch(() => []),
+    api.getMyTenant().catch(() => null),
   ]);
 
   const byStatus = new Map((monitor?.entities.shipmentsByStatus ?? []).map((r) => [r.status, r.n]));
@@ -37,6 +38,27 @@ export default async function DashboardPage() {
       />
 
       {error && <ErrorState message={error} />}
+
+      {tenant?.type === "OPERATOR" && (
+        <InfoBanner>
+          This view is the <strong>forwarder business</strong> — shipments booked directly with
+          your own customers, margin on freight you personally handle.{" "}
+          <Link href="/network" className="font-medium text-accent hover:underline">
+            The infrastructure business
+          </Link>{" "}
+          — other operators running on these rails, platform fee per shipment — lives separately
+          under Network Overview and Partners.
+        </InfoBanner>
+      )}
+      {tenant?.type === "PARTNER_AGENT" && (
+        <InfoBanner>
+          You run your own book of business on FORGE Freight&apos;s rails — your customers, your
+          branding, your relationships. We only see the freight you move, for the platform fee.{" "}
+          <Link href="/platform-fees" className="font-medium text-accent hover:underline">
+            See what you owe →
+          </Link>
+        </InfoBanner>
+      )}
 
       <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
         <StatTile label="Active shipments" value={active} tone="accent" />

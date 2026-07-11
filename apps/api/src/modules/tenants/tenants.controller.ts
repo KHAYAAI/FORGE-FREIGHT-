@@ -9,9 +9,9 @@ import {
   Patch,
   Post,
 } from "@nestjs/common";
-import { desc, eq } from "drizzle-orm";
+import { and, count, desc, eq, inArray, sum } from "drizzle-orm";
 import { z } from "zod";
-import { tenants, type Db } from "@forge-freight/db";
+import { charges, shipments, tenants, type Db } from "@forge-freight/db";
 import type { AuthContext } from "../auth/auth.types.js";
 import { CurrentAuth } from "../auth/current-auth.decorator.js";
 import { DB } from "../db/db.module.js";
@@ -48,10 +48,16 @@ export class TenantsController {
     }
   }
 
+  /**
+   * Partners plus the volume/revenue proof-points the infrastructure pitch
+   * needs — "who else is on this platform and how much do they move" is a
+   * different question from just listing tenant rows.
+   */
   @Get("partners")
   async listPartners(@CurrentAuth() auth: AuthContext) {
     await this.assertOperator(auth.tenantId);
-    return this.db
+
+    const partners = await this.db
       .select({
         id: tenants.id,
         name: tenants.name,
@@ -61,6 +67,40 @@ export class TenantsController {
       .from(tenants)
       .where(eq(tenants.type, "PARTNER_AGENT"))
       .orderBy(desc(tenants.createdAt));
+
+    if (partners.length === 0) return [];
+    const partnerIds = partners.map((p) => p.id);
+
+    const [shipmentCounts, feeRevenue] = await Promise.all([
+      this.db
+        .select({ tenantId: shipments.tenantId, n: count() })
+        .from(shipments)
+        .where(inArray(shipments.tenantId, partnerIds))
+        .groupBy(shipments.tenantId),
+      this.db
+        .select({
+          tenantId: charges.tenantId,
+          currency: charges.currency,
+          totalCents: sum(charges.sellCents).mapWith(Number),
+        })
+        .from(charges)
+        .where(and(inArray(charges.tenantId, partnerIds), eq(charges.kind, "FEE")))
+        .groupBy(charges.tenantId, charges.currency),
+    ]);
+
+    const shipmentsByTenant = new Map(shipmentCounts.map((r) => [r.tenantId, r.n]));
+    const revenueByTenant = new Map<string, { currency: string; amountCents: number }[]>();
+    for (const row of feeRevenue) {
+      const list = revenueByTenant.get(row.tenantId) ?? [];
+      list.push({ currency: row.currency, amountCents: row.totalCents });
+      revenueByTenant.set(row.tenantId, list);
+    }
+
+    return partners.map((p) => ({
+      ...p,
+      shipmentCount: shipmentsByTenant.get(p.id) ?? 0,
+      feeRevenue: revenueByTenant.get(p.id) ?? [],
+    }));
   }
 
   @Post("partners")
@@ -103,5 +143,54 @@ export class TenantsController {
       .from(tenants)
       .where(eq(tenants.id, auth.tenantId));
     return tenant ?? null;
+  }
+
+  /**
+   * Model 2 proof-of-concept data: total trade volume across EVERY tenant
+   * on the platform, aggregated by corridor. This is deliberately shaped
+   * like a government Track-and-Trace corridor dashboard — lane + volume +
+   * status, never customer-level detail — because that's the exact claim
+   * "we can be the national visibility layer" depends on being able to
+   * back up with a real query, not a slide.
+   */
+  @Get("network")
+  async network(@CurrentAuth() auth: AuthContext) {
+    await this.assertOperator(auth.tenantId);
+
+    const [tenantCounts, corridorVolume, statusVolume, totalFeeRevenue] = await Promise.all([
+      this.db
+        .select({ type: tenants.type, n: count() })
+        .from(tenants)
+        .groupBy(tenants.type),
+      this.db
+        .select({
+          origin: shipments.origin,
+          destination: shipments.destination,
+          n: count(),
+        })
+        .from(shipments)
+        .groupBy(shipments.origin, shipments.destination)
+        .orderBy(desc(count()))
+        .limit(20),
+      this.db
+        .select({ status: shipments.status, n: count() })
+        .from(shipments)
+        .groupBy(shipments.status),
+      this.db
+        .select({ currency: charges.currency, totalCents: sum(charges.sellCents).mapWith(Number) })
+        .from(charges)
+        .where(eq(charges.kind, "FEE"))
+        .groupBy(charges.currency),
+    ]);
+
+    const [totalShipments] = await this.db.select({ n: count() }).from(shipments);
+
+    return {
+      tenantsByType: tenantCounts,
+      totalShipments: totalShipments?.n ?? 0,
+      corridorVolume,
+      shipmentsByStatus: statusVolume,
+      platformFeeRevenue: totalFeeRevenue,
+    };
   }
 }
