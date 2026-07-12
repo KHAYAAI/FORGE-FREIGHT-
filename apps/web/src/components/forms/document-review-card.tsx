@@ -7,6 +7,7 @@ import type { FreightDocument } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Tag } from "@/components/ui/badge";
 import { Mono } from "@/components/ui/table";
+import { useToast } from "@/components/ui/toast";
 
 function extractedPreview(data: Record<string, unknown> | null): [string, string][] {
   if (!data) return [];
@@ -18,6 +19,7 @@ function extractedPreview(data: Record<string, unknown> | null): [string, string
 
 export function DocumentReviewCard({ doc }: { doc: FreightDocument }) {
   const router = useRouter();
+  const toast = useToast();
   const [busy, setBusy] = useState<"approve" | "reject" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const confidence = doc.extractionConfidence;
@@ -29,9 +31,15 @@ export function DocumentReviewCard({ doc }: { doc: FreightDocument }) {
     setError(null);
     try {
       await clientApi.reviewDocument(doc.id, decision);
+      toast.success(
+        decision === "APPROVED" ? "Document approved" : "Document rejected",
+        doc.fileName,
+      );
       router.refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      const message = err instanceof Error ? err.message : String(err);
+      setError(message);
+      toast.error("Review action failed", message);
       setBusy(null);
     }
   }

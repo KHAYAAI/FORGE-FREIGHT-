@@ -6,9 +6,11 @@ import { clientApi } from "@/lib/client-api";
 import { Button } from "@/components/ui/button";
 import { Field, Input } from "@/components/ui/field";
 import { Panel, PanelHeader } from "@/components/ui/card";
+import { useToast } from "@/components/ui/toast";
 
 export function PartnerForm() {
   const router = useRouter();
+  const toast = useToast();
   const [name, setName] = useState("");
   const [feePercent, setFeePercent] = useState("5");
   const [error, setError] = useState<string | null>(null);
@@ -19,14 +21,17 @@ export function PartnerForm() {
     setBusy(true);
     setError(null);
     try {
-      await clientApi.createPartner({
+      const partner = await clientApi.createPartner({
         name,
         platformFeeBps: Math.round(Number(feePercent) * 100),
       });
+      toast.success("Partner onboarded", `${partner.name} is now live on the platform.`);
       setName("");
       router.refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      const message = err instanceof Error ? err.message : String(err);
+      setError(message);
+      toast.error("Failed to create partner", message);
     } finally {
       setBusy(false);
     }

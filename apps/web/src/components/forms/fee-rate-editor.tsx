@@ -5,9 +5,11 @@ import { useState } from "react";
 import { clientApi } from "@/lib/client-api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/field";
+import { useToast } from "@/components/ui/toast";
 
 export function FeeRateEditor({ partnerId, currentBps }: { partnerId: string; currentBps: number | null }) {
   const router = useRouter();
+  const toast = useToast();
   const [value, setValue] = useState(String((currentBps ?? 0) / 100));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -17,9 +19,12 @@ export function FeeRateEditor({ partnerId, currentBps }: { partnerId: string; cu
     setError(null);
     try {
       await clientApi.updatePartnerFeeRate(partnerId, Math.round(Number(value) * 100));
+      toast.success("Fee rate updated", `New rate: ${value}%`);
       router.refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      const message = err instanceof Error ? err.message : String(err);
+      setError(message);
+      toast.error("Failed to update fee rate", message);
     } finally {
       setBusy(false);
     }

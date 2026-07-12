@@ -6,7 +6,18 @@ import { Table, THead, TR, TH, TD, Mono } from "@/components/ui/table";
 import { Tag } from "@/components/ui/badge";
 import { ErrorState } from "@/components/ui/empty-state";
 import { BarRow } from "@/components/ui/bar-row";
+import { Sparkline } from "@/components/ui/sparkline";
 import { AutoRefresh } from "@/components/shell/auto-refresh";
+
+/** Forward lifecycle order — used to shape the shipment-stage sparkline. */
+const SHIPMENT_LIFECYCLE = [
+  "BOOKED",
+  "IN_TRANSIT",
+  "AT_DESTINATION_PORT",
+  "CUSTOMS",
+  "ON_DELIVERY",
+  "DELIVERED",
+] as const;
 
 export const dynamic = "force-dynamic";
 
@@ -30,6 +41,10 @@ export default async function SystemMonitorPage() {
 
   const shipmentMax = Math.max(1, ...(monitor?.entities.shipmentsByStatus.map((r) => r.n) ?? [0]));
   const customsMax = Math.max(1, ...(monitor?.entities.customsByStatus.map((r) => r.n) ?? [0]));
+
+  const shipmentsByStatusMap = new Map((monitor?.entities.shipmentsByStatus ?? []).map((r) => [r.status, r.n]));
+  const lifecycleCounts = SHIPMENT_LIFECYCLE.map((status) => shipmentsByStatusMap.get(status) ?? 0);
+  const hasLifecycleData = lifecycleCounts.some((n) => n > 0);
 
   return (
     <div>
@@ -115,7 +130,19 @@ export default async function SystemMonitorPage() {
 
           <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-2">
             <Panel>
-              <PanelHeader title="Shipments by status" />
+              <PanelHeader
+                title="Shipments by status"
+                actions={
+                  hasLifecycleData && (
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] uppercase tracking-wide text-tertiary">
+                        Booked → Delivered
+                      </span>
+                      <Sparkline data={lifecycleCounts} tone="accent" width={80} height={22} />
+                    </div>
+                  )
+                }
+              />
               <div className="flex flex-col gap-2.5">
                 {monitor.entities.shipmentsByStatus.length === 0 ? (
                   <div className="py-4 text-center text-[12px] text-tertiary">No shipments yet.</div>

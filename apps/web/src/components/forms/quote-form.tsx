@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Field, Input, Select } from "@/components/ui/field";
 import { Panel, PanelHeader } from "@/components/ui/card";
 import { Table, TR, TD } from "@/components/ui/table";
+import { useToast } from "@/components/ui/toast";
 
 interface QuoteLine {
   chargeCode: string;
@@ -34,6 +35,7 @@ const MODES = ["OCEAN", "AIR", "ROAD", "RAIL"];
 
 export function QuoteForm({ parties }: { parties: Party[] }) {
   const router = useRouter();
+  const toast = useToast();
   const [form, setForm] = useState({
     customerId: parties[0]?.id ?? "",
     origin: "CNSHA",
@@ -54,9 +56,13 @@ export function QuoteForm({ parties }: { parties: Party[] }) {
     setBooking(null);
     setQuote(null);
     try {
-      setQuote(await clientApi.createQuote(form));
+      const result = await clientApi.createQuote(form);
+      setQuote(result);
+      toast.success("Quote generated", `${result.result.carrierName} — ${result.result.lines.length} line item(s).`);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      const message = e instanceof Error ? e.message : String(e);
+      setError(message);
+      toast.error("Failed to generate quote", message);
     } finally {
       setBusy(null);
     }
@@ -69,8 +75,11 @@ export function QuoteForm({ parties }: { parties: Party[] }) {
     try {
       const result = await clientApi.bookQuote(quote.quoteId);
       setBooking({ reference: result.reference, id: result.id });
+      toast.success("Shipment booked", `Reference ${result.reference}`);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      const message = e instanceof Error ? e.message : String(e);
+      setError(message);
+      toast.error("Failed to book quote", message);
     } finally {
       setBusy(null);
     }
