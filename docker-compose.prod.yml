@@ -4,8 +4,17 @@
 #   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 #
 # Required environment (see .env.example): AUTH_ISSUER, INGEST_API_KEY,
-# YENTE_URL, KAFKA_BROKERS, TEMPORAL_ADDRESS, ANTHROPIC_API_KEY.
-# Put a TLS-terminating reverse proxy (Caddy/Traefik) in front of api + web.
+# YENTE_URL, KAFKA_BROKERS, TEMPORAL_ADDRESS, ANTHROPIC_API_KEY,
+# DOC_STORAGE_S3_BUCKET. Put a TLS-terminating reverse proxy (Caddy/Traefik)
+# in front of api + web.
+#
+# Document storage is S3 even on this single-host compose file — config
+# validation refuses to boot with NODE_ENV=production and local disk
+# storage, because "production" and "single API replica forever" aren't
+# the same guarantee. Any S3-compatible endpoint works (AWS S3, Backblaze
+# B2, Cloudflare R2, self-hosted MinIO) — the SDK just needs credentials
+# on the host's default credential chain or via AWS_ACCESS_KEY_ID/
+# AWS_SECRET_ACCESS_KEY in the environment.
 #
 # TARIFF_CSV_PATH, if set, must point somewhere inside the api container —
 # bind-mount your real tariff CSV in (e.g. `- ./tariff.csv:/data/tariff.csv:ro`
@@ -29,13 +38,13 @@ services:
       YENTE_URL: http://yente:8000
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       CORS_ORIGINS: ${PORTAL_ORIGIN:-http://localhost:3000}
-      DOC_STORAGE_DIR: /data/documents
+      DOC_STORAGE_DRIVER: s3
+      DOC_STORAGE_S3_BUCKET: ${DOC_STORAGE_S3_BUCKET}
+      DOC_STORAGE_S3_REGION: ${DOC_STORAGE_S3_REGION:-af-south-1}
       TARIFF_CSV_PATH: ${TARIFF_CSV_PATH:-}
       AISSTREAM_API_KEY: ${AISSTREAM_API_KEY:-}
       NOVU_API_KEY: ${NOVU_API_KEY:-}
       NOVU_WORKFLOW_ID: ${NOVU_WORKFLOW_ID:-shipment-milestone}
-    volumes:
-      - documents:/data/documents
     depends_on:
       postgres:
         condition: service_healthy
@@ -66,6 +75,3 @@ services:
     ports:
       - "3000:3000"
     restart: unless-stopped
-
-volumes:
-  documents:

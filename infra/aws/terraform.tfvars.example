@@ -1,0 +1,25 @@
+# Copy to terraform.tfvars and fill in. See DEPLOY.md for the full runbook.
+
+aws_region   = "af-south-1"
+environment  = "production"
+project_name = "forge-freight"
+
+# Leave empty to deploy without a domain (plain HTTP via the ALB's own DNS
+# name, no host-based routing). Requires an existing Route53 public hosted
+# zone in this account when set.
+domain_name = ""
+
+# db_multi_az = true and single_nat_gateway = false once this carries real
+# customer freight data — see the cost note at the bottom of DEPLOY.md.
+db_instance_class  = "db.t4g.medium"
+db_multi_az        = false
+single_nat_gateway = true
+
+api_desired_count    = 2
+worker_desired_count = 1
+web_desired_count    = 2
+
+# Optional integrations — each degrades gracefully when left empty.
+anthropic_api_key = ""
+aisstream_api_key = ""
+novu_api_key      = ""

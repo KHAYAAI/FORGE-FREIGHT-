@@ -94,6 +94,30 @@ accrue automatically and show up on both `/billing/platform-fees` and the
 `/platform-fees` screen. 77/77 tests pass, both typechecks clean, `pnpm
 lint` clean, production build succeeds.
 
+**AWS deployment infrastructure** (`infra/aws/`, this round):
+- Full Terraform stack: VPC across 2 AZs with NAT, security groups scoped to
+  least-privilege (only the ALB is internet-facing), RDS Postgres 16, S3 for
+  documents, ECR repos, ECS Fargate cluster + services for api/worker/web
+  behind an ALB with host-based routing and ACM TLS, and self-hosted
+  single-task Fargate services for Redpanda/Temporal/Keycloak/yente (mirrors
+  `docker-compose.yml`'s topology) plus a managed OpenSearch domain backing
+  yente's sanctions index. IAM roles scoped per task (api gets S3 write,
+  nothing else does). CloudWatch log group per service.
+- GitHub Actions deploy workflow (`.github/workflows/deploy-aws.yml`,
+  manual `workflow_dispatch` trigger): builds and pushes all three images to
+  ECR tagged with the commit SHA, then `terraform apply`s that tag. OIDC
+  federation to AWS — no long-lived access keys as GitHub secrets.
+- Full runbook in `DEPLOY.md`, including the handful of genuine one-time
+  manual steps (creating Temporal/Keycloak's logical databases on the shared
+  RDS instance, Keycloak realm import, yente dataset load) — same
+  "operator action, not code gap" honesty as the list below.
+- **Not verified against a real AWS account**: `terraform fmt` is clean, but
+  `init`/`validate`/`plan`/`apply` have not been run — this sandbox has no
+  AWS credentials and its network policy blocks `registry.terraform.io`, so
+  provider plugins can't even download here. Run `terraform plan` yourself
+  and read it before `apply`. Documented explicitly at the top of
+  `DEPLOY.md` rather than left implicit.
+
 ## Must do before going live (operator action, not code)
 
 These aren't code gaps — they're steps whoever deploys this has to take
@@ -118,10 +142,13 @@ provision on its own:
    `index`/`yente` services) needs a populated OpenSanctions dataset, not
    just the empty Elasticsearch container the dev compose file spins up.
    Follow yente's own data-loading docs.
-6. **Document storage**: `DOC_STORAGE_DIR` is local disk today, backed by a
-   named Docker volume in `docker-compose.prod.yml`. Fine for a single-host
-   launch; migrate to S3-compatible storage before running multiple API
-   replicas (local disk isn't shared across containers).
+6. **Document storage**: now S3 (or any S3-compatible endpoint — AWS S3,
+   Backblaze B2, Cloudflare R2, self-hosted MinIO), not local disk — config
+   validation refuses to boot with `NODE_ENV=production` and
+   `DOC_STORAGE_DRIVER=local`, precisely because local disk isn't shared
+   across API replicas. Set `DOC_STORAGE_S3_BUCKET`; credentials come from
+   the environment's default AWS credential chain (ECS task role in
+   `infra/aws`, or `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` elsewhere).
 7. **DNS + CORS**: set `CORS_ORIGINS` and `PORTAL_ORIGIN` to the real
    production domain before cutover — they default to `localhost`.
 8. **Optional integrations, if you want them live at launch**: `AISSTREAM_API_KEY`

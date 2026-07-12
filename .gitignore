@@ -8,3 +8,11 @@ coverage/
 storage/
 .DS_Store
 drizzle/meta/_journal.json.bak
+
+# Terraform
+infra/aws/.terraform/
+infra/aws/*.tfstate
+infra/aws/*.tfstate.*
+infra/aws/terraform.tfvars
+infra/aws/.terraform.lock.hcl
+infra/aws/tfplan

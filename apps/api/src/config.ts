@@ -39,7 +39,12 @@ const ConfigSchema = z
     ANTHROPIC_MODEL: z.string().default("claude-opus-4-8"),
     /** Extractions below this confidence require human review. */
     EXTRACTION_REVIEW_THRESHOLD: z.coerce.number().min(0).max(1).default(0.85),
+
+    /** local = disk (dev only, single process). s3 = required once there's more than one API replica. */
+    DOC_STORAGE_DRIVER: z.enum(["local", "s3"]).default("local"),
     DOC_STORAGE_DIR: z.string().default("./storage/documents"),
+    DOC_STORAGE_S3_BUCKET: z.string().default(""),
+    DOC_STORAGE_S3_REGION: z.string().default("af-south-1"),
 
     /** Path to a CSV overlaying the built-in tariff extract. Empty = extract only. */
     TARIFF_CSV_PATH: z.string().default(""),
@@ -103,6 +108,21 @@ const ConfigSchema = z
           path: ["YENTE_URL"],
         });
       }
+      if (cfg.DOC_STORAGE_DRIVER !== "s3") {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message:
+            "DOC_STORAGE_DRIVER must be 's3' in production — local disk isn't shared across API replicas",
+          path: ["DOC_STORAGE_DRIVER"],
+        });
+      }
+    }
+    if (cfg.DOC_STORAGE_DRIVER === "s3" && !cfg.DOC_STORAGE_S3_BUCKET) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "DOC_STORAGE_S3_BUCKET is required when DOC_STORAGE_DRIVER=s3",
+        path: ["DOC_STORAGE_S3_BUCKET"],
+      });
     }
     if (cfg.AUTH_MODE === "jwt" && !cfg.AUTH_ISSUER) {
       ctx.addIssue({

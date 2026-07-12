@@ -5,8 +5,6 @@ import {
   NotFoundException,
 } from "@nestjs/common";
 import { and, eq } from "drizzle-orm";
-import { mkdir, writeFile } from "node:fs/promises";
-import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { documents, type Db } from "@forge-freight/db";
 import {
@@ -21,6 +19,7 @@ import { DB } from "../db/db.module.js";
 import { appendEvent } from "../db/event-store.js";
 import { isExtractable } from "./extraction-schemas.js";
 import { ExtractionService } from "./extraction.service.js";
+import { createDocumentStorage, type DocumentStorage } from "./storage.js";
 
 type DocType =
   | "COMMERCIAL_INVOICE"
@@ -34,11 +33,15 @@ type DocType =
 
 @Injectable()
 export class DocumentsService {
+  private readonly storage: DocumentStorage;
+
   constructor(
     @Inject(DB) private readonly db: Db,
     @Inject(CONFIG) private readonly cfg: AppConfig,
     @Inject(ExtractionService) private readonly extraction: ExtractionService,
-  ) {}
+  ) {
+    this.storage = createDocumentStorage(cfg);
+  }
 
   /**
    * Upload → store → extract → review-queue. Extraction runs inline (a
@@ -55,9 +58,7 @@ export class DocumentsService {
   }) {
     const documentId = randomUUID();
     const storageKey = `${params.tenantId}/${documentId}-${params.fileName.replaceAll("/", "_")}`;
-    const dir = join(this.cfg.DOC_STORAGE_DIR, params.tenantId);
-    await mkdir(dir, { recursive: true });
-    await writeFile(join(this.cfg.DOC_STORAGE_DIR, storageKey), params.fileBytes);
+    await this.storage.write(storageKey, params.fileBytes);
 
     await this.db.transaction(async (tx) => {
       await tx.insert(documents).values({
