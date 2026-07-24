@@ -20,6 +20,24 @@ export interface Shipment {
   createdAt: string;
 }
 
+/** A keyset-paginated slice of a list endpoint. */
+export interface Page<T> {
+  rows: T[];
+  /** Null on the last page; pass back as `cursor` to fetch the next one. */
+  nextCursor: string | null;
+  /** Total matching the filters, ignoring the cursor. */
+  total: number;
+}
+
+/** One lane of freight in motion, aggregated across the whole book. */
+export interface Corridor {
+  origin: string;
+  destination: string;
+  n: number;
+  /** Open exceptions on that lane — non-zero flags it on the map. */
+  exceptions: number;
+}
+
 export interface ShipmentEvent {
   eventId: string;
   type: string;

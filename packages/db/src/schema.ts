@@ -287,6 +287,10 @@ export const shipments = pgTable(
   (t) => [
     uniqueIndex("shipments_reference_uq").on(t.reference),
     index("shipments_tenant_status_idx").on(t.tenantId, t.status),
+    // Backs keyset pagination, which orders by (created_at, id) within a
+    // tenant. Postgres scans an ascending index backwards, so this serves the
+    // DESC page order without a second index.
+    index("shipments_tenant_created_idx").on(t.tenantId, t.createdAt, t.id),
   ],
 );
 

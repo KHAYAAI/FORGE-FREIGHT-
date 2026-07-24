@@ -89,7 +89,25 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 
 ```bash
 pnpm build       # build all packages
-pnpm test        # vitest across the workspace
+pnpm test        # unit suites across the workspace (no services needed)
 pnpm typecheck
 pnpm lint        # eslint across the workspace
 ```
+
+### Integration tests
+
+`pnpm test` mocks the query builder, so it cannot tell you whether the tenant
+predicate, the keyset cursor, or the event-store transaction actually behave as
+intended in SQL. Those run separately, against a real Postgres:
+
+```bash
+pnpm dev:infra   # or any Postgres you are willing to write to
+DATABASE_URL=postgres://forge:forge@localhost:5432/forge_freight_test \
+  pnpm test:integration
+```
+
+The suite pushes the schema with the same `drizzle-kit push` the dev and deploy
+paths use, then builds its own tenants with random ids and deletes exactly what
+it created — so it is safe to point at a database that already has data, though
+never at production. CI runs it on every push with a Postgres service
+container.

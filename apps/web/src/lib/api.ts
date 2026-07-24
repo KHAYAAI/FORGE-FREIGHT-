@@ -1,11 +1,13 @@
 import { getSession } from "./session";
 import type {
   ClassificationCandidate,
+  Corridor,
   CustomsEntry,
   FinanceViews,
   FreightDocument,
   Invoice,
   NetworkOverview,
+  Page,
   Partner,
   Party,
   PlatformFees,
@@ -110,8 +112,15 @@ export const api = {
     apiPost<Shipment>(`/quotes/${id}/book`, carrierBookingRef ? { carrierBookingRef } : {}),
 
   // Shipments
-  listShipments: (status?: string) =>
-    apiGet<Shipment[]>(`/shipments${status ? `?status=${status}` : ""}`),
+  listShipments: (params: { status?: string; cursor?: string; limit?: number } = {}) => {
+    const q = new URLSearchParams();
+    if (params.status) q.set("status", params.status);
+    if (params.cursor) q.set("cursor", params.cursor);
+    if (params.limit !== undefined) q.set("limit", String(params.limit));
+    const qs = q.toString();
+    return apiGet<Page<Shipment>>(`/shipments${qs ? `?${qs}` : ""}`);
+  },
+  corridors: () => apiGet<Corridor[]>("/ops/corridors"),
   getShipment: (id: string) => apiGet<Shipment>(`/shipments/${id}`),
   shipmentTimeline: (id: string) => apiGet<ShipmentEvent[]>(`/shipments/${id}/events`),
   openExceptions: () => apiGet<ShipmentException[]>("/ops/exceptions"),

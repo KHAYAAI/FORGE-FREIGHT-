@@ -1,14 +1,15 @@
 {
   "name": "@forge-freight/api",
   "version": "0.1.0",
-  "description": "FORGE Freight modular monolith — NestJS backend.",
+  "description": "FORGE Freight modular monolith \u2014 NestJS backend.",
   "type": "module",
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "start": "node dist/main.js",
-    "dev": "tsx watch src/main.ts"
+    "dev": "tsx watch src/main.ts",
+    "test:integration": "vitest run --config vitest.integration.config.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.110.0",

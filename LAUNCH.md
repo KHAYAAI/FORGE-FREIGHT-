@@ -151,19 +151,43 @@ message. Bookings and customs already did this for their own domain errors;
 quoting was the one path that didn't. Covered by
 `apps/api/test/quoting-service.test.ts` and confirmed against the running API.
 
-**Gaps this pass surfaced** (not fixed — each needs a product decision):
-- `GET /shipments` caps at `limit(200)` with no pagination, no cursor and no
-  total. Past 200 shipments an operator silently sees a truncated list, and
-  anything derived from it — including the dashboard's corridor map — quietly
-  under-reports. Fine for launch volumes; needs a cursor before it isn't.
-- No frontend tests at all. Every test in the repo is API or package logic;
-  the console is verified by eye and by typecheck only.
-- CI runs no integration tests — there's no Postgres service in
-  `.github/workflows/ci.yml`, so nothing exercises a real query, a real
-  transaction, or the tenant isolation the whole security model rests on.
-  The unit suite would pass with the database wired wrong.
-- CI triggers on `push` to `main` and on pull requests only, so work on a
-  feature branch runs no checks until a PR exists.
+**Gaps this pass surfaced — all four since closed:**
+
+1. **`GET /shipments` truncated silently at 200.** Now keyset-paginated on
+   `(created_at, id)` with an opaque cursor, and the response carries the
+   filtered `total`, so a short page is visibly a page. Offset pagination was
+   rejected deliberately: shipments are created while an operator pages, and
+   offsets skip or repeat rows underneath them. A cursor is a position, not a
+   capability — every query still re-filters by tenant, so a forged or borrowed
+   cursor can move the window but never widen it, which the integration suite
+   asserts directly. The console shows "Showing 50 of 1,204" with First/Next
+   controls; a new index on `(tenant_id, created_at, id)` backs the scan.
+2. **Nothing derived from that list may summarise a page.** The dashboard's
+   corridor map now reads `GET /ops/corridors`, a database-side aggregate over
+   the whole book with open-exception counts per lane, rather than counting the
+   rows that happened to be on screen.
+3. **No frontend tests.** `apps/web` now runs vitest + Testing Library (jsdom):
+   27 tests over the corridor map's geometry, auto-zoom, label collision,
+   tone-by-exception and hover readout; the LOCODE gazetteer (including a
+   coordinate sanity check that catches a transposed lat/lon); and the money
+   and date formatters. Deliberately no `@vitejs/plugin-react` — its Fast
+   Refresh wiring is dev-server machinery tests don't need.
+4. **CI had no Postgres and no integration tests.** `.github/workflows/ci.yml`
+   gained an `integration` job with a `postgres:16-alpine` service running
+   `pnpm test:integration`: 16 tests covering tenant isolation across list,
+   timeline, exceptions and corridors; keyset paging over 25 shipments with
+   deliberately colliding timestamps (walks every page and asserts no gaps or
+   repeats); and event-store transaction semantics plus the partial unique
+   index that makes redelivered carrier messages idempotent. Verified
+   non-vacuous by mutation: deleting the tenant predicate from the shipments
+   query fails three of them.
+5. **CI ignored feature branches.** Now triggers on every `push`, not just
+   `main` and open pull requests.
+
+Unit and integration suites are split by config (`vitest.config.ts` vs
+`vitest.integration.config.ts`), so `pnpm test` still runs with no services
+started and `pnpm test:integration` needs `DATABASE_URL`. Totals after this
+pass: **139 unit tests + 16 integration tests**, lint/typecheck/build clean.
 
 ## Must do before going live (operator action, not code)
 

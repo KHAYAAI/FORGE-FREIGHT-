@@ -1,8 +1,9 @@
 name: CI
 
 on:
+  # Every branch, not just main and open PRs — work on a feature branch used to
+  # run no checks at all until someone remembered to open a pull request.
   push:
-    branches: [main]
   pull_request:
 
 jobs:
@@ -20,3 +21,36 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm build
       - run: pnpm test
+
+  integration:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: forge
+          POSTGRES_PASSWORD: forge
+          POSTGRES_DB: forge_freight_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U forge"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # Runs against a real Postgres: pushes the schema with the same
+      # drizzle-kit command the dev and deploy paths use, then exercises the
+      # tenant predicate, keyset pagination and event-store transactions as
+      # SQL. The unit suite mocks the query builder, so it would pass with the
+      # tenant filter deleted — this job is the one that would not.
+      - run: pnpm test:integration
+        env:
+          DATABASE_URL: postgres://forge:forge@localhost:5432/forge_freight_test

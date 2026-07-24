@@ -2,7 +2,7 @@
   "name": "forge-freight",
   "private": true,
   "version": "0.1.0",
-  "description": "FORGE Freight — digital freight forwarding operating system for African trade corridors",
+  "description": "FORGE Freight \u2014 digital freight forwarding operating system for African trade corridors",
   "engines": {
     "node": ">=22"
   },
@@ -11,6 +11,7 @@
   "scripts": {
     "build": "pnpm -r build",
     "test": "pnpm -r test",
+    "test:integration": "pnpm --filter @forge-freight/api test:integration",
     "typecheck": "pnpm -r typecheck",
     "lint": "eslint .",
     "dev:infra": "docker compose up -d",
