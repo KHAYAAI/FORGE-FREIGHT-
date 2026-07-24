@@ -118,6 +118,53 @@ lint` clean, production build succeeds.
   and read it before `apply`. Documented explicitly at the top of
   `DEPLOY.md` rather than left implicit.
 
+## Audit pass — corridor map + live re-verification
+
+Stood the stack up again from scratch (Postgres 16, migrate, seed, API, web),
+signed in, booked six shipments across three corridors, and drove the console
+in a real browser rather than trusting the previous run's notes.
+
+**Built this round**
+- **Corridor map** (`components/ui/corridor-map.tsx`): geographic view of the
+  book, on the dashboard ("Active corridors") and on Network Overview
+  ("Corridor map"). Pure SVG — no mapping library, no tile server, no external
+  request at render time, which keeps it inside the same CSP and offline
+  posture as the rest of the console. Lanes are UN/LOCODE pairs weighted by
+  volume; the viewport auto-fits the corridors present, so a Durban–Johannesburg
+  book zooms into Southern Africa and a Shanghai lane pulls it back to the
+  Indian Ocean. On the dashboard a lane turns red when any shipment on it has
+  an open exception, which makes the map a triage surface rather than
+  decoration. Port labels are placed greedily by volume and suppressed on
+  collision, reappearing on hover.
+- Supporting static data: `lib/world-land.ts` (Natural Earth 110m land
+  outline, public domain, simplified and inlined — see the provenance note in
+  the file) and `lib/locode.ts` (curated UN/LOCODE gazetteer, ~125 places on
+  the corridors this platform actually serves). Codes outside the extract are
+  reported as unmapped instead of guessed at.
+
+**Bug found live and fixed**: quoting a lane with no rate card returned
+`500 Internal server error` and logged a stack trace as an unhandled
+exception. `NoRateError`/`NoMarginRuleError` are ordinary answers to an
+ordinary request — a customer asking for a corridor we don't price — so
+`QuotingService.issueQuote` now maps them to `422` carrying the lane in the
+message. Bookings and customs already did this for their own domain errors;
+quoting was the one path that didn't. Covered by
+`apps/api/test/quoting-service.test.ts` and confirmed against the running API.
+
+**Gaps this pass surfaced** (not fixed — each needs a product decision):
+- `GET /shipments` caps at `limit(200)` with no pagination, no cursor and no
+  total. Past 200 shipments an operator silently sees a truncated list, and
+  anything derived from it — including the dashboard's corridor map — quietly
+  under-reports. Fine for launch volumes; needs a cursor before it isn't.
+- No frontend tests at all. Every test in the repo is API or package logic;
+  the console is verified by eye and by typecheck only.
+- CI runs no integration tests — there's no Postgres service in
+  `.github/workflows/ci.yml`, so nothing exercises a real query, a real
+  transaction, or the tenant isolation the whole security model rests on.
+  The unit suite would pass with the database wired wrong.
+- CI triggers on `push` to `main` and on pull requests only, so work on a
+  feature branch runs no checks until a PR exists.
+
 ## Must do before going live (operator action, not code)
 
 These aren't code gaps — they're steps whoever deploys this has to take

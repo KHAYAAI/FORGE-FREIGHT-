@@ -6,6 +6,7 @@ import { Table, THead, TR, TH, TD, Mono } from "@/components/ui/table";
 import { Tag } from "@/components/ui/badge";
 import { EmptyState, ErrorState, InfoBanner } from "@/components/ui/empty-state";
 import { BarRow } from "@/components/ui/bar-row";
+import { CorridorMap } from "@/components/ui/corridor-map";
 
 export const dynamic = "force-dynamic";
 
@@ -67,6 +68,27 @@ export default async function NetworkPage() {
                   />
                 ))}
               </div>
+
+              <Panel className="mb-4">
+                <PanelHeader
+                  title="Corridor map"
+                  eyebrow="Every lane on the platform"
+                  actions={
+                    <span className="text-[11px] text-tertiary">
+                      Node size = volume through that location
+                    </span>
+                  }
+                />
+                <CorridorMap
+                  lanes={network.corridorVolume.map((c) => ({
+                    origin: c.origin,
+                    destination: c.destination,
+                    value: c.n,
+                  }))}
+                  aspect={2.5}
+                  emptyLabel="No corridors to plot — nothing booked across the network yet."
+                />
+              </Panel>
 
               <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
                 <Panel>

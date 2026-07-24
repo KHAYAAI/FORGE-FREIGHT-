@@ -1,4 +1,9 @@
-import { Inject, Injectable, NotFoundException } from "@nestjs/common";
+import {
+  Inject,
+  Injectable,
+  NotFoundException,
+  UnprocessableEntityException,
+} from "@nestjs/common";
 import { and, eq } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import {
@@ -14,6 +19,8 @@ import { appendEvent } from "../db/event-store.js";
 import { RatesService } from "../rates/rates.service.js";
 import {
   buildQuote,
+  NoMarginRuleError,
+  NoRateError,
   type MarginRuleInput,
   type QuoteRequest,
   type QuoteResult,
@@ -63,7 +70,20 @@ export class QuotingService {
       minMarginCents: r.minMarginCents,
     }));
 
-    const result = buildQuote(input, cards, rules);
+    // "We don't price that lane" and "this tenant has no margin rule" are
+    // ordinary answers to an ordinary request, not server faults. Without this
+    // they reach the catch-all filter and come back as a 500 "Internal server
+    // error" with a stack trace in the logs — which tells a customer nothing
+    // and buries a real configuration gap under noise.
+    let result: QuoteResult;
+    try {
+      result = buildQuote(input, cards, rules);
+    } catch (err) {
+      if (err instanceof NoRateError || err instanceof NoMarginRuleError) {
+        throw new UnprocessableEntityException(err.message);
+      }
+      throw err;
+    }
 
     const quoteId = randomUUID();
     const validUntil = new Date(
