@@ -12,10 +12,14 @@ import type { RateCardInput } from "../src/modules/quoting/quote-engine.js";
  * caller gets a bare 500 "Internal server error" with no usable reason.
  */
 
-/** Enough of Drizzle's builder to satisfy `select().from().where()`. */
+/** Enough of Drizzle's builder to satisfy `select().from().where().orderBy()`. */
 function stubDb(rows: unknown[]): Db {
   return {
-    select: () => ({ from: () => ({ where: async () => rows }) }),
+    select: () => ({
+      from: () => ({
+        where: () => ({ orderBy: async () => rows }),
+      }),
+    }),
   } as unknown as Db;
 }
 

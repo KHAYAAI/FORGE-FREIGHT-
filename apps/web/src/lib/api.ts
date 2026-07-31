@@ -7,8 +7,10 @@ import type {
   FreightDocument,
   Invoice,
   NetworkOverview,
+  MarginRule,
   Page,
   PortalTimelineEvent,
+  RateCard,
   Partner,
   Party,
   PlatformFees,
@@ -115,6 +117,11 @@ export const api = {
     return apiGet<Page<Shipment>>(`/shipments${qs ? `?${qs}` : ""}`);
   },
   corridors: () => apiGet<Corridor[]>("/ops/corridors"),
+
+  // Rates administration — the buy side. Read here, written from the client
+  // through /api/proxy so the page can refresh in place.
+  rateCards: () => apiGet<RateCard[]>("/rates/cards"),
+  marginRules: () => apiGet<MarginRule[]>("/rates/margin-rules"),
 
   // Portal — the customer-facing views. Separate endpoints, not the operator
   // ones with a filter: the API scopes these by linked party, not by tenant.

@@ -303,3 +303,55 @@ export interface SystemMonitor {
     parties: number;
   };
 }
+
+// --- Rates administration ---------------------------------------------------
+
+export type TransportMode = "OCEAN" | "AIR" | "ROAD" | "RAIL";
+export type ContainerTypeCode = "20GP" | "40GP" | "40HC" | "45HC" | "20RF" | "40RF" | "LCL";
+export type SurchargeBasis =
+  | "PER_CONTAINER"
+  | "PER_SHIPMENT"
+  | "PER_BL"
+  | "PERCENT_OF_FREIGHT";
+
+export interface RateSurcharge {
+  id: string;
+  rateCardId: string;
+  code: string;
+  description: string;
+  basis: SurchargeBasis;
+  /** Basis points when `basis` is PERCENT_OF_FREIGHT, minor currency units otherwise. */
+  amountCents: number;
+  currency: string;
+}
+
+export interface RateCard {
+  id: string;
+  tenantId: string;
+  kind: "CONTRACT" | "SPOT";
+  carrierId: string | null;
+  carrierName: string;
+  mode: TransportMode;
+  origin: string;
+  destination: string;
+  containerType: ContainerTypeCode | null;
+  buyAmountCents: number;
+  currency: string;
+  transitDays: number | null;
+  validFrom: string;
+  validTo: string;
+  createdAt: string;
+  surcharges: RateSurcharge[];
+}
+
+export interface MarginRule {
+  id: string;
+  tenantId: string;
+  customerId: string | null;
+  origin: string | null;
+  destination: string | null;
+  mode: TransportMode | null;
+  marginBps: number;
+  minMarginCents: number;
+  createdAt: string;
+}

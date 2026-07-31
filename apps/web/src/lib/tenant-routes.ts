@@ -16,6 +16,7 @@ export type RouteAudience = "operational" | "customer" | "shared";
 const OPERATIONAL_PREFIXES = [
   "/system",
   "/quotes",
+  "/rates",
   "/shipments",
   "/ops",
   "/customs",

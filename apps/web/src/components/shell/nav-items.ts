@@ -24,6 +24,7 @@ export const NAV_ITEMS: NavItem[] = [
   { href: "/track/invoices", label: "My Invoices", group: "Overview", visibleTo: ["CUSTOMER"] },
 
   { href: "/quotes/new", label: "New Quote", group: "Commercial", visibleTo: OPERATIONAL },
+  { href: "/rates", label: "Rates", group: "Commercial", visibleTo: OPERATIONAL },
   { href: "/shipments", label: "Shipments", group: "Commercial", visibleTo: OPERATIONAL },
   { href: "/ops", label: "Ops Console", group: "Commercial", visibleTo: OPERATIONAL },
 

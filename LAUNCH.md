@@ -187,7 +187,7 @@ quoting was the one path that didn't. Covered by
 Unit and integration suites are split by config (`vitest.config.ts` vs
 `vitest.integration.config.ts`), so `pnpm test` still runs with no services
 started and `pnpm test:integration` needs `DATABASE_URL`. Totals as of the
-latest pass: **193 unit tests (101 API + 92 web) + 26 integration tests**,
+latest pass: **202 unit tests (106 API + 96 web) + 42 integration tests**,
 lint/typecheck/build clean.
 
 ## Console authentication (this round)
@@ -300,6 +300,64 @@ suite: **26 tests** (10 new for the portal), proven non-vacuous by mutation —
 deleting the portal's scope predicate fails three of them, and flattening
 `mayVisit` to `return true` fails two frontend tests.
 
+## Rate cards and margin rules (this round)
+
+Pricing a new lane used to mean an operator writing `INSERT`s against
+`rate_cards` by hand: `RatesService` was read-only and seed-populated. That
+made onboarding a corridor an engineering task rather than a commercial one,
+and left partner agents — who are supposed to run their own book on these
+rails — unable to price anything at all. Both are now a screen.
+
+- **`/rates` API**: full CRUD for rate cards (with surcharges written in the
+  same transaction — a card carrying half its costs is worse than no card) and
+  for margin rules. Open to `OPERATOR` and `PARTNER_AGENT`, each scoped to its
+  own tenant; a customer tenant is refused outright. Another tenant's card
+  answers **404, not 403** — a rival probing for a competitor's card ids should
+  learn nothing from the status code.
+- **Input is normalised, not just validated**: a lane filed as `zadur` would be
+  invisible to every quote for `ZADUR` and read as a missing rate rather than a
+  typo, so LOCODEs and currency codes are upper-cased on the way in. Percentage
+  surcharges are capped at 10000 basis points, because that column holds cents
+  for every other basis and a 15% BAF typed as `150000` would bill 1,500% of
+  freight.
+- **Surcharges are replaced as a set**, not patched row by row. A tariff
+  arrives as a sheet; "these are the costs now" is the only statement that
+  cannot leave a withdrawn BAF behind.
+- **Deleting the last catch-all margin rule is refused** — it would leave every
+  lane unquotable, and discovering that from a customer-facing 422 is a worse
+  way to learn it.
+- **`/rates` screen**: rate cards with expiry/not-yet-live badges and an
+  inline surcharge editor, margin rules ordered most-specific-first (the order
+  the quote engine resolves them in, so the table reads as "this is the rule
+  that will apply"), and banners when there is no catch-all rule or when two
+  rules cover the same scope.
+
+**Two bugs found while building this, both pre-existing:**
+
+1. **Every validation error on the entire API was a `500`.** A
+   `@Catch(ZodError)` filter was registered *before* the catch-all on the
+   assumption that listing it first gave it priority — but Nest evaluates
+   global filters in reverse registration order, so the catch-all swallowed
+   every one. `POST /parties {}` answered "Internal server error" rather than
+   naming the missing field. Folded the Zod case into the single global filter
+   so there is no ordering left to get wrong; `apps/api/test/exception-filter.test.ts`
+   now asserts on the status a bad body produces, which is what nothing did
+   before.
+2. **Equally specific margin rules resolved nondeterministically.**
+   `resolveMarginRule` kept the first rule of the highest score, and the rules
+   were fetched with no `ORDER BY` — so with two catch-alls the same quote
+   could be priced at 15% or 18% on two runs with nothing changed. Ties now
+   break by recency (newest wins, which is what an operator means when they add
+   a rule on top of an old one), the fetch is ordered, and the screen warns
+   when two rules overlap.
+
+**Verified live**: created a lane through the API and again through the
+browser form, edited its buy price, replaced its surcharge set, and then
+quoted it — the quote came back priced off the edited buy with the new
+surcharges and without the withdrawn one, through the untouched quoting
+engine. 16 new integration tests, mutation-proven: dropping the `tenantId`
+predicate from the card and rule write paths fails two of them.
+
 ## Must do before going live (operator action, not code)
 
 These aren't code gaps — they're steps whoever deploys this has to take
@@ -363,12 +421,9 @@ provision on its own:
 
 Called out explicitly so nobody mistakes "not built yet" for "forgotten":
 
-- **Rate cards for partner tenants**: `BillingAccrual` will charge a
-  partner's platform fee correctly once it books freight, but partners
-  currently can't self-serve their own rate cards — there's still no write
-  endpoint for `rate_cards` (`RatesService` is read-only, seed-populated).
-  Onboarding a partner today means an operator inserting rate cards
-  directly, same as it's always been for the operator tenant itself.
+- ~~**Rate cards for partner tenants**~~ — closed. `/rates` gives both
+  operators and partner agents full CRUD over their own rate cards and margin
+  rules, so onboarding a lane no longer means an operator writing SQL.
 - **SARS tariff book is a reference extract, not the gazette**: ~90 headings
   covering the common corridor commodities, not the full Schedule 1 with
   every subheading, specific/formula duty, anti-dumping margin, or

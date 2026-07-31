@@ -3,16 +3,16 @@ import { NestFactory } from "@nestjs/core";
 import helmet from "helmet";
 import { AppModule } from "./app.module.js";
 import { GlobalExceptionFilter } from "./common/global-exception.filter.js";
-import { ZodExceptionFilter } from "./common/zod-exception.filter.js";
 import { loadConfig } from "./config.js";
 
 async function bootstrap() {
   const cfg = loadConfig(); // fail fast on invalid config, before Nest boots
   const app = await NestFactory.create(AppModule);
 
-  // Filters are tried in order; the specific one (Zod) must come before the
-  // catch-all so validation errors keep their field-level detail.
-  app.useGlobalFilters(new ZodExceptionFilter(), new GlobalExceptionFilter());
+  // One filter, deliberately: Nest evaluates global filters in reverse
+  // registration order, so a second, more specific one would have to be
+  // registered *after* this to take effect. See the filter's own note.
+  app.useGlobalFilters(new GlobalExceptionFilter());
 
   app.use(
     helmet({

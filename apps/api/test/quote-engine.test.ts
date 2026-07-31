@@ -65,6 +65,7 @@ const defaultRule: MarginRuleInput = {
   mode: null,
   marginBps: 1800,
   minMarginCents: 1500_00,
+  createdAt: new Date("2026-01-01T00:00:00Z"),
 };
 
 const laneRule: MarginRuleInput = {
@@ -75,6 +76,7 @@ const laneRule: MarginRuleInput = {
   mode: "OCEAN",
   marginBps: 1200,
   minMarginCents: 1000_00,
+  createdAt: new Date("2026-01-01T00:00:00Z"),
 };
 
 const request: QuoteRequest = {
@@ -90,6 +92,21 @@ const request: QuoteRequest = {
 describe("margin rule resolution", () => {
   it("prefers the most specific rule (lane+mode beats default)", () => {
     expect(resolveMarginRule([defaultRule, laneRule], request).id).toBe("rule-lane");
+  });
+
+  it("breaks a tie between equally specific rules by recency", () => {
+    // Two catch-alls is a configuration mistake, but an easy one to make. It
+    // used to resolve to whichever row the database returned first, so the
+    // same quote could be priced differently on two runs.
+    const older: MarginRuleInput = { ...defaultRule, id: "rule-old", marginBps: 1000 };
+    const newer: MarginRuleInput = {
+      ...defaultRule,
+      id: "rule-new",
+      marginBps: 2000,
+      createdAt: new Date("2026-06-01T00:00:00Z"),
+    };
+    expect(resolveMarginRule([older, newer], request).id).toBe("rule-new");
+    expect(resolveMarginRule([newer, older], request).id).toBe("rule-new");
   });
 
   it("customer-specific beats lane-specific", () => {

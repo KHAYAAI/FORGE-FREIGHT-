@@ -59,3 +59,6 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ pa
 export async function DELETE(req: NextRequest, { params }: { params: Promise<{ path: string[] }> }) {
   return forward(req, (await params).path);
 }
+export async function PUT(req: NextRequest, { params }: { params: Promise<{ path: string[] }> }) {
+  return forward(req, (await params).path);
+}

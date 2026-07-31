@@ -7,13 +7,21 @@ import {
   Logger,
 } from "@nestjs/common";
 import type { Response } from "express";
+import { ZodError } from "zod";
 
 /**
- * Last-resort catch-all. NestJS's built-in HttpException handling already
- * strips internals from its own responses; this exists for the exceptions
- * that aren't HttpException — a driver error, a bug — which would otherwise
- * surface as an unformatted 500 with whatever message the thrown error
- * carries. Logs the full error server-side, returns a flat, safe body.
+ * The API's single global exception filter.
+ *
+ * A separate `@Catch(ZodError)` filter used to be registered ahead of this one
+ * on the assumption that listing the specific filter first would give it
+ * priority. It does not — Nest evaluates global filters in reverse
+ * registration order, so this catch-all, registered last, swallowed every
+ * validation error and answered `500 Internal server error`. Malformed
+ * requests had been reported as the server's fault, with the field-level
+ * detail never reaching the caller.
+ *
+ * Handling the specific case here rather than reordering means there is no
+ * ordering left to get wrong.
  */
 @Catch()
 export class GlobalExceptionFilter implements ExceptionFilter {
@@ -21,6 +29,19 @@ export class GlobalExceptionFilter implements ExceptionFilter {
 
   catch(exception: unknown, host: ArgumentsHost) {
     const res = host.switchToHttp().getResponse<Response>();
+
+    // Malformed input is the client's fault: 400, naming the offending fields.
+    if (exception instanceof ZodError) {
+      res.status(HttpStatus.BAD_REQUEST).json({
+        statusCode: HttpStatus.BAD_REQUEST,
+        error: "Bad Request",
+        issues: exception.issues.map((i) => ({
+          path: i.path.join("."),
+          message: i.message,
+        })),
+      });
+      return;
+    }
 
     if (exception instanceof HttpException) {
       const status = exception.getStatus();

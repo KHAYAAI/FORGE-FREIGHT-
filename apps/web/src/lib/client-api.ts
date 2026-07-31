@@ -9,6 +9,9 @@ import type {
   Partner,
   Party,
   Quote,
+  MarginRule,
+  RateCard,
+  RateSurcharge,
   Shipment,
 } from "./types";
 
@@ -38,6 +41,22 @@ async function patch<T>(path: string, body?: unknown): Promise<T> {
   });
   if (!res.ok) throw new Error(await res.text());
   return res.json() as Promise<T>;
+}
+
+async function put<T>(path: string, body?: unknown): Promise<T> {
+  const res = await fetch(`/api/proxy${path}`, {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json() as Promise<T>;
+}
+
+/** DELETE answers 204 with no body, so there is nothing to parse. */
+async function del(path: string): Promise<void> {
+  const res = await fetch(`/api/proxy${path}`, { method: "DELETE" });
+  if (!res.ok) throw new Error(await res.text());
 }
 
 async function upload<T>(path: string, form: FormData): Promise<T> {
@@ -99,4 +118,50 @@ export const clientApi = {
     post<Partner>("/tenants/partners", body),
   updatePartnerFeeRate: (id: string, platformFeeBps: number) =>
     patch<Partner>(`/tenants/partners/${id}/fee-rate`, { platformFeeBps }),
+
+  listRateCards: () => get<RateCard[]>("/rates/cards"),
+  createRateCard: (body: RateCardDraft) => post<RateCard>("/rates/cards", body),
+  updateRateCard: (id: string, body: Partial<RateCardDraft>) =>
+    patch<RateCard>(`/rates/cards/${id}`, body),
+  replaceSurcharges: (id: string, surcharges: SurchargeDraft[]) =>
+    put<RateSurcharge[]>(`/rates/cards/${id}/surcharges`, { surcharges }),
+  deleteRateCard: (id: string) => del(`/rates/cards/${id}`),
+
+  listMarginRules: () => get<MarginRule[]>("/rates/margin-rules"),
+  createMarginRule: (body: MarginRuleDraft) => post<MarginRule>("/rates/margin-rules", body),
+  updateMarginRule: (id: string, body: Partial<MarginRuleDraft>) =>
+    patch<MarginRule>(`/rates/margin-rules/${id}`, body),
+  deleteMarginRule: (id: string) => del(`/rates/margin-rules/${id}`),
 };
+
+export interface SurchargeDraft {
+  code: string;
+  description: string;
+  basis: RateSurcharge["basis"];
+  amountCents: number;
+  currency: string;
+}
+
+export interface RateCardDraft {
+  kind: "CONTRACT" | "SPOT";
+  carrierName: string;
+  mode: RateCard["mode"];
+  origin: string;
+  destination: string;
+  containerType: RateCard["containerType"];
+  buyAmountCents: number;
+  currency: string;
+  transitDays: number | null;
+  validFrom: string;
+  validTo: string;
+  surcharges?: SurchargeDraft[];
+}
+
+export interface MarginRuleDraft {
+  customerId: string | null;
+  origin: string | null;
+  destination: string | null;
+  mode: RateCard["mode"] | null;
+  marginBps: number;
+  minMarginCents: number;
+}

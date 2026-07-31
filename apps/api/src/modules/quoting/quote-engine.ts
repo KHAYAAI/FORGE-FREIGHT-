@@ -37,6 +37,8 @@ export interface MarginRuleInput {
   mode: string | null;
   marginBps: number;
   minMarginCents: number;
+  /** Tiebreak between rules of equal specificity — see `resolveMarginRule`. */
+  createdAt: Date;
 }
 
 export interface QuoteRequest {
@@ -88,6 +90,13 @@ export class NoMarginRuleError extends Error {
  * Most-specific-wins margin rule resolution. A rule with a non-null field
  * must match the request exactly; specificity is customer (8) > lane (4) >
  * mode (2). The all-null rule is the tenant default.
+ *
+ * Ties are broken by recency, newest first. Two rules of equal scope is a
+ * configuration mistake rather than a design, but it is an easy one to make
+ * — and until this tiebreak existed the winner was whichever row Postgres
+ * happened to return first, so the same quote could be priced differently on
+ * two runs with nothing changed. Newest-wins at least matches what an
+ * operator means when they add a rule on top of an old one.
  */
 export function resolveMarginRule(
   rules: MarginRuleInput[],
@@ -104,7 +113,11 @@ export function resolveMarginRule(
       (rule.customerId !== null ? 8 : 0) +
       (laneSpecified ? 4 : 0) +
       (rule.mode !== null ? 2 : 0);
-    if (!best || score > best.score) best = { rule, score };
+    const wins =
+      !best ||
+      score > best.score ||
+      (score === best.score && rule.createdAt > best.rule.createdAt);
+    if (wins) best = { rule, score };
   }
   if (!best) throw new NoMarginRuleError();
   return best.rule;

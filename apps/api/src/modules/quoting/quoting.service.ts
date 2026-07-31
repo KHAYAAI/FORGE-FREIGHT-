@@ -4,7 +4,7 @@ import {
   NotFoundException,
   UnprocessableEntityException,
 } from "@nestjs/common";
-import { and, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import {
   marginRules,
@@ -59,7 +59,11 @@ export class QuotingService {
     const ruleRows = await this.db
       .select()
       .from(marginRules)
-      .where(eq(marginRules.tenantId, input.tenantId));
+      .where(eq(marginRules.tenantId, input.tenantId))
+      // Deterministic order in, deterministic rule out: `resolveMarginRule`
+      // breaks specificity ties by recency, and an unordered scan made that
+      // depend on the query plan.
+      .orderBy(desc(marginRules.createdAt));
     const rules: MarginRuleInput[] = ruleRows.map((r) => ({
       id: r.id,
       customerId: r.customerId,
@@ -68,6 +72,7 @@ export class QuotingService {
       mode: r.mode,
       marginBps: r.marginBps,
       minMarginCents: r.minMarginCents,
+      createdAt: r.createdAt,
     }));
 
     // "We don't price that lane" and "this tenant has no margin rule" are
