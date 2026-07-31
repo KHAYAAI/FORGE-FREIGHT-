@@ -43,6 +43,7 @@ const oidcSession: Session = {
   tenantId: "11111111-1111-1111-1111-111111111111",
   tenantLabel: "FORGE Freight",
   userId: "user-42",
+  tenantType: "OPERATOR",
   mode: "oidc",
   tokens: { accessToken: "access-token-value", refreshToken: "refresh-token-value", expiresAt: 0 },
 };
@@ -94,11 +95,21 @@ describe("sealed session", () => {
     // authenticating after real auth was switched on.
     useDev();
     const devCookie = await sealSession(
-      { tenantId: "t", tenantLabel: "t", userId: "dev", mode: "dev" },
+      { tenantId: "t", tenantLabel: "t", userId: "dev", tenantType: "OPERATOR", mode: "dev" },
       3600,
     );
     useOidc();
     expect(await openSession(devCookie)).toBeNull();
+  });
+
+  it("refuses a cookie that carries no tenant type", async () => {
+    // Cookies minted before the console routed by tenant type. Honouring one
+    // would leave the middleware unable to decide which product to show, so
+    // it is treated as no session at all.
+    useOidc();
+    const { tenantType: _dropped, ...legacy } = oidcSession;
+    const sealed = await sealSession(legacy as Session, 3600);
+    expect(await openSession(sealed)).toBeNull();
   });
 
   it("refuses an oidc cookie under dev mode", async () => {
@@ -140,7 +151,7 @@ describe("needsRefresh", () => {
   });
 
   it("never refreshes a dev session", () => {
-    expect(needsRefresh({ tenantId: "t", tenantLabel: "t", userId: "dev", mode: "dev" }, now)).toBe(
+    expect(needsRefresh({ tenantId: "t", tenantLabel: "t", userId: "dev", tenantType: "OPERATOR", mode: "dev" }, now)).toBe(
       false,
     );
   });
@@ -153,7 +164,7 @@ describe("authHeaders", () => {
 
   it("sends dev headers in dev mode", () => {
     expect(
-      authHeaders({ tenantId: "tenant-1", tenantLabel: "t", userId: "dev", mode: "dev" }),
+      authHeaders({ tenantId: "tenant-1", tenantLabel: "t", userId: "dev", tenantType: "OPERATOR", mode: "dev" }),
     ).toEqual({ "x-dev-tenant-id": "tenant-1", "x-dev-user-id": "dev" });
   });
 

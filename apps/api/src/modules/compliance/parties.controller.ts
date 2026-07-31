@@ -3,18 +3,25 @@ import {
   Controller,
   Get,
   Inject,
+  NotFoundException,
   Param,
   ParseUUIDPipe,
   Post,
+  UnprocessableEntityException,
 } from "@nestjs/common";
 import { Throttle } from "@nestjs/throttler";
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { z } from "zod";
-import { parties, type Db } from "@forge-freight/db";
+import { parties, tenants, type Db } from "@forge-freight/db";
 import type { AuthContext } from "../auth/auth.types.js";
 import { CurrentAuth } from "../auth/current-auth.decorator.js";
 import { DB } from "../db/db.module.js";
 import { ScreeningService } from "./screening.service.js";
+
+const LinkTenantDto = z.object({
+  /** Null revokes portal access for this party. */
+  customerTenantId: z.string().uuid().nullable(),
+});
 
 const CreatePartyDto = z.object({
   name: z.string().min(2).max(200),
@@ -79,5 +86,51 @@ export class PartiesController {
       .where(eq(parties.id, id));
     if (!party || party.tenantId !== auth.tenantId) return null;
     return party;
+  }
+
+  /**
+   * Grants (or revokes) portal access for a party, by pointing it at a
+   * CUSTOMER tenant. This is the only switch that lets data cross a tenant
+   * boundary anywhere in the platform, so it is deliberately explicit: a
+   * forwarder decides, per party, that this shipper may watch its own cargo.
+   *
+   * Pass `customerTenantId: null` to revoke.
+   */
+  @Post(":id/customer-tenant")
+  async linkCustomerTenant(
+    @Param("id", ParseUUIDPipe) id: string,
+    @Body() body: unknown,
+    @CurrentAuth() auth: AuthContext,
+  ) {
+    const dto = LinkTenantDto.parse(body);
+
+    const [party] = await this.db
+      .select({ id: parties.id })
+      .from(parties)
+      .where(and(eq(parties.id, id), eq(parties.tenantId, auth.tenantId)));
+    if (!party) throw new NotFoundException("Party not found");
+
+    if (dto.customerTenantId) {
+      const [target] = await this.db
+        .select({ type: tenants.type })
+        .from(tenants)
+        .where(eq(tenants.id, dto.customerTenantId));
+      if (!target) throw new NotFoundException("Tenant not found");
+      // Pointing a party at an operator or partner tenant would hand that
+      // tenant a second, weaker way to read shipments — the portal scope —
+      // alongside its own. Only CUSTOMER tenants may be linked.
+      if (target.type !== "CUSTOMER") {
+        throw new UnprocessableEntityException(
+          `Only CUSTOMER tenants can be linked to a party; that tenant is ${target.type}.`,
+        );
+      }
+    }
+
+    const [updated] = await this.db
+      .update(parties)
+      .set({ customerTenantId: dto.customerTenantId })
+      .where(and(eq(parties.id, id), eq(parties.tenantId, auth.tenantId)))
+      .returning();
+    return updated;
   }
 }

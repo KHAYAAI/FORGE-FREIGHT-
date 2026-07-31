@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { authConfig } from "@/lib/auth-config";
 import { discover, refreshTokens, toSessionTokens } from "@/lib/oidc";
+import { homeFor, mayVisit } from "@/lib/tenant-routes";
 import {
   SESSION_COOKIE,
   needsRefresh,
@@ -41,6 +42,17 @@ export async function middleware(req: NextRequest) {
   const session = raw ? await openSession(raw) : null;
 
   if (!session) return toLogin(req);
+
+  // A shipper has no business on an operator screen and vice versa. The nav
+  // already hides the other side's links, but a typed URL bypassed that
+  // entirely — this is where it actually stops.
+  if (!mayVisit(session.tenantType, pathname)) {
+    const url = req.nextUrl.clone();
+    url.pathname = homeFor(session.tenantType);
+    url.search = "";
+    return NextResponse.redirect(url);
+  }
+
   if (cfg.mode !== "oidc" || !needsRefresh(session)) return NextResponse.next();
 
   const refreshToken = session.tokens?.refreshToken;

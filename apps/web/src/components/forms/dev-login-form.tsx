@@ -9,7 +9,6 @@ export function DevLoginForm() {
   const router = useRouter();
   const params = useSearchParams();
   const [tenantId, setTenantId] = useState("");
-  const [tenantLabel, setTenantLabel] = useState("FORGE Freight — Operator");
   const [userId, setUserId] = useState("dev");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -26,9 +25,12 @@ export function DevLoginForm() {
       const res = await fetch("/api/session", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ tenantId: tenantId.trim(), tenantLabel: tenantLabel.trim(), userId: userId.trim() || "dev" }),
+        body: JSON.stringify({ tenantId: tenantId.trim(), userId: userId.trim() || "dev" }),
       });
-      if (!res.ok) throw new Error(await res.text());
+      if (!res.ok) {
+        const body = (await res.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(body?.error ?? `Sign-in failed (${res.status})`);
+      }
       router.push(params.get("next") ?? "/");
       router.refresh();
     } catch (err) {
@@ -58,9 +60,6 @@ export function DevLoginForm() {
                 className="font-mono text-[12px]"
                 autoFocus
               />
-            </Field>
-            <Field label="Tenant label" hint="Display name only — cosmetic.">
-              <Input value={tenantLabel} onChange={(e) => setTenantLabel(e.target.value)} />
             </Field>
             <Field label="User ID" hint="Actor recorded on events you create.">
               <Input value={userId} onChange={(e) => setUserId(e.target.value)} />

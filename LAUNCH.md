@@ -186,8 +186,9 @@ quoting was the one path that didn't. Covered by
 
 Unit and integration suites are split by config (`vitest.config.ts` vs
 `vitest.integration.config.ts`), so `pnpm test` still runs with no services
-started and `pnpm test:integration` needs `DATABASE_URL`. Totals after this
-pass: **139 unit tests + 16 integration tests**, lint/typecheck/build clean.
+started and `pnpm test:integration` needs `DATABASE_URL`. Totals as of the
+latest pass: **193 unit tests (101 API + 92 web) + 26 integration tests**,
+lint/typecheck/build clean.
 
 ## Console authentication (this round)
 
@@ -235,6 +236,70 @@ provider's end-session endpoint. Dev mode re-verified unchanged afterwards.
 discovery fallback, claim extraction, open-redirect rejection, cookie
 encryption, mode confusion, and the refresh window.
 
+## Customer portal (this round)
+
+The audit's second-largest gap: a freight forwarder's customers had nowhere to
+look. Every screen in the console assumed an operator, so "where is my cargo?"
+was answered by phoning the forwarder. The platform now has a shipper-facing
+product.
+
+**The scoping problem, and why it gets its own controller.** A customer's cargo
+does not belong to the customer's tenant — it belongs to the *forwarder's*
+tenant, because the forwarder booked it. So the portal cannot use the
+`tenantId = caller` predicate every other query in the system uses; it is the
+one deliberate cross-tenant read on the platform. Rather than branch inside the
+operator endpoints — which is exactly how a tenant-isolation bug gets written —
+the portal is its own controller (`modules/portal/`) with its own scoping rule
+in one file (`portal.scope.ts`):
+
+- `parties.customer_tenant_id` links a forwarder's party record to a CUSTOMER
+  tenant. The link is created deliberately by the forwarder via
+  `POST /parties/:id/customer-tenant`, which 422s if the target tenant isn't of
+  type `CUSTOMER`. No link, no visibility — the default is invisible.
+- Every portal query resolves that link to a set of party ids and filters
+  `bookings.customer_id` by it. A customer tenant with no links sees an empty
+  list, never an error that would confirm anything exists.
+- `GET /portal/shipments/:id` returns `null` rather than 403 for someone
+  else's shipment, so probing cannot distinguish "not yours" from "doesn't
+  exist".
+- The timeline drops `charge.*` and `quote.issued`. A customer sees movement;
+  the forwarder's cost build-up and margin are its own business.
+
+Read-only by design. A customer can watch, not act: booking, documents and
+customs stay with the forwarder who carries the liability for them.
+
+**Screens**: `/track` (their shipments, keyset-paginated, with the corridor map
+scoped to their own lanes), `/track/[id]` (a milestone timeline worded for a
+shipper — "Container loaded on the vessel", not `container.loaded`; anything
+not in the wording map is dropped rather than shown raw), and `/track/invoices`.
+
+**Route access is now enforced, not just hidden.** The sidebar already filtered
+by tenant type, but typing `/finance` into the address bar as a customer still
+rendered the operator screen — a page of error states dressed up as a screen
+they were entitled to. `lib/tenant-routes.ts` is now the authority the nav
+merely reflects, and the middleware redirects a tenant that asks for the other
+side's product. The session cookie carries the tenant *type*, resolved from the
+API at sign-in rather than read from a token claim: the IdP owns the tenant id,
+but what kind of tenant it is belongs to this platform's records — otherwise an
+IdP admin could promote a customer to an operator by editing a claim. A test
+asserts the nav and the route table cannot drift apart.
+
+**Bug found while testing this**: a non-uuid tenant identifier — a malformed
+`x-dev-tenant-id`, or a `tenant_id` claim someone set to a slug — flowed
+straight into the query layer, where Postgres raised a cast error and the
+request became a `500`. A bad credential now fails at the guard as `401`
+(`isTenantId` in `auth.types.ts`), on both the dev and the JWT paths.
+
+**Verified live**, not just by tests: linked a real party to a CUSTOMER tenant
+on the running stack and confirmed the shipper sees its 126 shipments and no
+one else's; an unlinked CUSTOMER tenant sees empty lists everywhere; an
+operator gets 403 on `/portal/*`; a customer gets redirected off all eleven
+operator routes and an operator off the portal; and the portal timeline
+withholds a `charge.accrued` event that is present in the database. Integration
+suite: **26 tests** (10 new for the portal), proven non-vacuous by mutation —
+deleting the portal's scope predicate fails three of them, and flattening
+`mayVisit` to `return true` fails two frontend tests.
+
 ## Must do before going live (operator action, not code)
 
 These aren't code gaps — they're steps whoever deploys this has to take
@@ -257,29 +322,35 @@ provision on its own:
    load balancer, also set `AUTH_PUBLIC_ORIGIN`/`AUTH_REDIRECT_URI` so the
    redirect URI the console sends matches what Keycloak has registered.
    `AUTH_MODE=dev` is refused in production by both services.
-2. **TLS**: put a reverse proxy (Caddy/Traefik) in front of `api:3001` and
+2. **Customer tenants**: the portal shows a shipper nothing until someone
+   links it. For each customer you want to give access to, create a tenant of
+   type `CUSTOMER`, give its users a `tenant_id` claim pointing at it, and
+   `POST /parties/:id/customer-tenant` for each party record that customer
+   books under. Unlinked is the safe default — a new CUSTOMER tenant sees an
+   empty portal, not someone else's freight.
+3. **TLS**: put a reverse proxy (Caddy/Traefik) in front of `api:3001` and
    `web:3000`. Neither container terminates TLS itself.
-3. **Secrets**: `INGEST_API_KEY`, `ANTHROPIC_API_KEY`, Postgres credentials,
+4. **Secrets**: `INGEST_API_KEY`, `ANTHROPIC_API_KEY`, Postgres credentials,
    and the Keycloak client secret must come from a real secrets manager in
    production, not the `.env` file used for local dev.
-4. **Backups**: schedule `scripts/backup-db.sh` via cron (or your
+5. **Backups**: schedule `scripts/backup-db.sh` via cron (or your
    orchestrator's equivalent) against the production `DATABASE_URL`, and
    confirm the restore path (`gunzip -c ... | psql`) at least once before
    relying on it.
-5. **yente index**: the sanctions screening index (`docker-compose.yml`'s
+6. **yente index**: the sanctions screening index (`docker-compose.yml`'s
    `index`/`yente` services) needs a populated OpenSanctions dataset, not
    just the empty Elasticsearch container the dev compose file spins up.
    Follow yente's own data-loading docs.
-6. **Document storage**: now S3 (or any S3-compatible endpoint — AWS S3,
+7. **Document storage**: now S3 (or any S3-compatible endpoint — AWS S3,
    Backblaze B2, Cloudflare R2, self-hosted MinIO), not local disk — config
    validation refuses to boot with `NODE_ENV=production` and
    `DOC_STORAGE_DRIVER=local`, precisely because local disk isn't shared
    across API replicas. Set `DOC_STORAGE_S3_BUCKET`; credentials come from
    the environment's default AWS credential chain (ECS task role in
    `infra/aws`, or `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` elsewhere).
-7. **DNS + CORS**: set `CORS_ORIGINS` and `PORTAL_ORIGIN` to the real
+8. **DNS + CORS**: set `CORS_ORIGINS` and `PORTAL_ORIGIN` to the real
    production domain before cutover — they default to `localhost`.
-8. **Optional integrations, if you want them live at launch**: `AISSTREAM_API_KEY`
+9. **Optional integrations, if you want them live at launch**: `AISSTREAM_API_KEY`
    (aisstream.io account) for live vessel positions, `NOVU_API_KEY` +
    a workflow named to match `NOVU_WORKFLOW_ID` configured in the Novu
    dashboard with the WhatsApp/SMS/email channels you actually want, and

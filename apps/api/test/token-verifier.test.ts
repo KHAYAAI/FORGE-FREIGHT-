@@ -67,6 +67,13 @@ describe("TokenVerifier", () => {
     await expect(verifier.verify(token)).rejects.toThrow(/tenant_id/);
   });
 
+  it("rejects a tenant claim that is not a uuid", async () => {
+    // Otherwise the value reaches the query layer and Postgres turns a bad
+    // credential into a 500.
+    const token = await makeToken({ tenant_id: "acme-corp" });
+    await expect(verifier.verify(token)).rejects.toThrow(/must be a tenant uuid/);
+  });
+
   it("rejects garbage tokens", async () => {
     await expect(verifier.verify("not.a.jwt")).rejects.toThrow(TokenVerificationError);
   });

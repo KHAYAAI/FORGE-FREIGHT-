@@ -7,7 +7,7 @@ import {
 } from "@nestjs/common";
 import type { Request } from "express";
 import { CONFIG, type AppConfig } from "../../config.js";
-import { AUTH_CONTEXT_KEY, type AuthContext } from "./auth.types.js";
+import { AUTH_CONTEXT_KEY, isTenantId, type AuthContext } from "./auth.types.js";
 import { TokenVerifier } from "./token-verifier.js";
 
 export const TOKEN_VERIFIER = Symbol("TOKEN_VERIFIER");
@@ -33,6 +33,9 @@ export class JwtAuthGuard implements CanActivate {
       const tenantId = req.header("x-dev-tenant-id");
       if (!tenantId) {
         throw new UnauthorizedException("Dev auth: x-dev-tenant-id header required");
+      }
+      if (!isTenantId(tenantId)) {
+        throw new UnauthorizedException("Dev auth: x-dev-tenant-id must be a uuid");
       }
       const auth: AuthContext = {
         tenantId,

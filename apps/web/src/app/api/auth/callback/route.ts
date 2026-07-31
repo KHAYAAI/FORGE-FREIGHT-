@@ -2,7 +2,8 @@ import { NextResponse, type NextRequest } from "next/server";
 import { authConfig } from "@/lib/auth-config";
 import { discover, exchangeCode, sessionFromTokens, OidcError } from "@/lib/oidc";
 import { FLOW_COOKIE, parseFlowState, publicOrigin, redirectUriFor } from "@/lib/auth-flow";
-import { SESSION_COOKIE, sealSession, sessionCookieOptions } from "@/lib/session";
+import { SESSION_COOKIE, sealSession, sessionCookieOptions, type Session } from "@/lib/session";
+import { fetchTenant, TenantLookupError } from "@/lib/tenant-lookup";
 
 /** Session cookie lifetime. Refreshes extend the tokens inside it, not this. */
 const SESSION_TTL_SECONDS = 60 * 60 * 12;
@@ -43,7 +44,15 @@ export async function GET(req: NextRequest) {
       redirectUri: redirectUriFor(req),
       verifier: flow.verifier,
     });
-    const session = sessionFromTokens(cfg, tokens);
+    const partial = sessionFromTokens(cfg, tokens);
+    // The console renders different products for a forwarder and a shipper, so
+    // it has to know which one signed in before it renders anything at all.
+    const tenant = await fetchTenant({ authorization: `Bearer ${tokens.access_token}` });
+    const session: Session = {
+      ...partial,
+      tenantType: tenant.type,
+      tenantLabel: tenant.name || partial.tenantLabel,
+    };
     const sealed = await sealSession(session, SESSION_TTL_SECONDS);
 
     const res = NextResponse.redirect(new URL(flow.next, publicOrigin(req)));
@@ -53,7 +62,10 @@ export async function GET(req: NextRequest) {
   } catch (err) {
     // The message is safe to surface — it names the misconfiguration (a
     // missing tenant claim, most often) without echoing tokens.
-    const reason = err instanceof OidcError ? err.message : "exchange_failed";
+    const reason =
+      err instanceof OidcError || err instanceof TenantLookupError
+        ? err.message
+        : "exchange_failed";
     return failure(req, reason);
   }
 }

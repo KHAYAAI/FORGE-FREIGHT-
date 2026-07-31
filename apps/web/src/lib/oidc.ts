@@ -220,7 +220,15 @@ export class MissingTenantClaimError extends OidcError {
  * decoded, not verified, here: it was just received over TLS directly from the
  * token endpoint, and the API verifies its signature on every call.
  */
-export function sessionFromTokens(cfg: OidcConfig, tokens: TokenResponse): Session {
+/**
+ * Everything the access token can tell us about the session. Tenant *type* is
+ * not in that set — it comes from the platform's own records, so the caller
+ * completes the session with {@link fetchTenant}.
+ */
+export function sessionFromTokens(
+  cfg: OidcConfig,
+  tokens: TokenResponse,
+): Omit<Session, "tenantType"> {
   const claims = decodeJwt(tokens.access_token);
 
   const tenantId = claims[cfg.tenantClaim];

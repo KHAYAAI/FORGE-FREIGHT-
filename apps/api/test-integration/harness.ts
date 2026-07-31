@@ -84,6 +84,25 @@ export async function createShipments(
   return rows.map((r) => r.id);
 }
 
+/**
+ * A CUSTOMER tenant, linked to the fixture's customer party so the portal can
+ * resolve a scope for it. Mirrors what an operator does via
+ * `POST /parties/:id/customer-tenant`.
+ */
+export async function linkCustomerTenant(db: Db, fixture: Fixture, name: string): Promise<string> {
+  const [tenant] = await db
+    .insert(tenants)
+    .values({ id: randomUUID(), type: "CUSTOMER", name: `test-${name}-${randomUUID().slice(0, 8)}` })
+    .returning({ id: tenants.id });
+
+  await db
+    .update(parties)
+    .set({ customerTenantId: tenant!.id })
+    .where(eq(parties.id, fixture.customerId));
+
+  return tenant!.id;
+}
+
 export async function raiseException(db: Db, fixture: Fixture, shipmentId: string) {
   await db.insert(shipmentExceptions).values({
     id: randomUUID(),
@@ -96,6 +115,11 @@ export async function raiseException(db: Db, fixture: Fixture, shipmentId: strin
 }
 
 /** Deletes in FK order. Safe to call on a partially built fixture. */
+export async function dropCustomerTenant(db: Db, tenantId: string) {
+  await db.update(parties).set({ customerTenantId: null }).where(eq(parties.customerTenantId, tenantId));
+  await db.delete(tenants).where(eq(tenants.id, tenantId));
+}
+
 export async function dropTenantFixture(db: Db, fixture: Fixture) {
   const ids = await db
     .select({ id: shipments.id })

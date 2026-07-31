@@ -16,6 +16,7 @@ import { ProjectorModule } from "./modules/projector/projector.module.js";
 import { QuotingModule } from "./modules/quoting/quoting.module.js";
 import { RatesModule } from "./modules/rates/rates.module.js";
 import { ShipmentsModule } from "./modules/shipments/shipments.module.js";
+import { PortalModule } from "./modules/portal/portal.module.js";
 import { SystemModule } from "./modules/system/system.module.js";
 import { TemporalModule } from "./modules/temporal/temporal.module.js";
 import { TenantsModule } from "./modules/tenants/tenants.module.js";
@@ -42,6 +43,7 @@ import { TenantsModule } from "./modules/tenants/tenants.module.js";
     BillingModule,
     CustomsModule,
     DocumentsModule,
+    PortalModule,
     SystemModule,
     TenantsModule,
   ],

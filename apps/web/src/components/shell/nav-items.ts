@@ -8,20 +8,31 @@ export interface NavItem {
   visibleTo?: TenantType[];
 }
 
+const OPERATIONAL: TenantType[] = ["OPERATOR", "PARTNER_AGENT"];
+
 export const NAV_ITEMS: NavItem[] = [
-  { href: "/", label: "Dashboard", group: "Overview" },
-  { href: "/system", label: "System Monitor", group: "Overview" },
+  // A customer landing on `/` is sent straight to `/track`, so offering them
+  // the link would be offering a link that bounces.
+  { href: "/", label: "Dashboard", group: "Overview", visibleTo: OPERATIONAL },
+  { href: "/system", label: "System Monitor", group: "Overview", visibleTo: OPERATIONAL },
 
-  { href: "/quotes/new", label: "New Quote", group: "Commercial" },
-  { href: "/shipments", label: "Shipments", group: "Commercial" },
-  { href: "/ops", label: "Ops Console", group: "Commercial" },
+  // A customer sees its own cargo and its own invoices, and nothing else —
+  // these read the portal endpoints, which scope by linked party rather than
+  // by tenant. Every operational screen below is hidden from them, and the
+  // API refuses them regardless of what the nav shows.
+  { href: "/track", label: "My Shipments", group: "Overview", visibleTo: ["CUSTOMER"] },
+  { href: "/track/invoices", label: "My Invoices", group: "Overview", visibleTo: ["CUSTOMER"] },
 
-  { href: "/customs", label: "Customs", group: "Compliance" },
-  { href: "/documents", label: "Documents", group: "Compliance" },
-  { href: "/parties", label: "Parties", group: "Compliance" },
+  { href: "/quotes/new", label: "New Quote", group: "Commercial", visibleTo: OPERATIONAL },
+  { href: "/shipments", label: "Shipments", group: "Commercial", visibleTo: OPERATIONAL },
+  { href: "/ops", label: "Ops Console", group: "Commercial", visibleTo: OPERATIONAL },
 
-  { href: "/invoices", label: "Invoices", group: "Finance" },
-  { href: "/finance", label: "Finance Views", group: "Finance" },
+  { href: "/customs", label: "Customs", group: "Compliance", visibleTo: OPERATIONAL },
+  { href: "/documents", label: "Documents", group: "Compliance", visibleTo: OPERATIONAL },
+  { href: "/parties", label: "Parties", group: "Compliance", visibleTo: OPERATIONAL },
+
+  { href: "/invoices", label: "Invoices", group: "Finance", visibleTo: OPERATIONAL },
+  { href: "/finance", label: "Finance Views", group: "Finance", visibleTo: OPERATIONAL },
   // Platform fees only mean something for a partner tenant — an operator
   // sees what partners owe via the Partners screen instead.
   { href: "/platform-fees", label: "Platform Fees", group: "Finance", visibleTo: ["PARTNER_AGENT"] },

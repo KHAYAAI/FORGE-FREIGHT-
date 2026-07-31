@@ -5,7 +5,7 @@ import {
   type JWTVerifyGetKey,
 } from "jose";
 import type { AppConfig } from "../../config.js";
-import type { AuthContext } from "./auth.types.js";
+import { isTenantId, type AuthContext } from "./auth.types.js";
 
 export class TokenVerificationError extends Error {
   constructor(message: string, options?: { cause?: unknown }) {
@@ -54,6 +54,11 @@ export class TokenVerifier {
     if (typeof tenantId !== "string" || tenantId.length === 0) {
       throw new TokenVerificationError(
         `Token is missing the '${this.cfg.AUTH_TENANT_CLAIM}' claim`,
+      );
+    }
+    if (!isTenantId(tenantId)) {
+      throw new TokenVerificationError(
+        `The '${this.cfg.AUTH_TENANT_CLAIM}' claim must be a tenant uuid`,
       );
     }
     if (typeof payload.sub !== "string" || payload.sub.length === 0) {

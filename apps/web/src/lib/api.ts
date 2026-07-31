@@ -8,6 +8,7 @@ import type {
   Invoice,
   NetworkOverview,
   Page,
+  PortalTimelineEvent,
   Partner,
   Party,
   PlatformFees,
@@ -114,6 +115,20 @@ export const api = {
     return apiGet<Page<Shipment>>(`/shipments${qs ? `?${qs}` : ""}`);
   },
   corridors: () => apiGet<Corridor[]>("/ops/corridors"),
+
+  // Portal — the customer-facing views. Separate endpoints, not the operator
+  // ones with a filter: the API scopes these by linked party, not by tenant.
+  portalShipments: (params: { status?: string; cursor?: string; limit?: number } = {}) => {
+    const q = new URLSearchParams();
+    if (params.status) q.set("status", params.status);
+    if (params.cursor) q.set("cursor", params.cursor);
+    if (params.limit !== undefined) q.set("limit", String(params.limit));
+    const qs = q.toString();
+    return apiGet<Page<Shipment>>(`/portal/shipments${qs ? `?${qs}` : ""}`);
+  },
+  portalShipment: (id: string) => apiGet<Shipment | null>(`/portal/shipments/${id}`),
+  portalTimeline: (id: string) => apiGet<PortalTimelineEvent[]>(`/portal/shipments/${id}/events`),
+  portalInvoices: () => apiGet<Invoice[]>("/portal/invoices"),
   getShipment: (id: string) => apiGet<Shipment>(`/shipments/${id}`),
   shipmentTimeline: (id: string) => apiGet<ShipmentEvent[]>(`/shipments/${id}/events`),
   openExceptions: () => apiGet<ShipmentException[]>("/ops/exceptions"),

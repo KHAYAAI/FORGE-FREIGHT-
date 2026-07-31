@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { api, fmtDate } from "@/lib/api";
 import { PageHeader } from "@/components/ui/page-header";
 import { StatTile } from "@/components/ui/stat-tile";
@@ -11,6 +12,12 @@ import { CorridorMap, type CorridorLane } from "@/components/ui/corridor-map";
 export const dynamic = "force-dynamic";
 
 export default async function DashboardPage() {
+  // A customer tenant has no operator dashboard to show — every panel here
+  // reads endpoints the API refuses them. Send them to their own view rather
+  // than rendering a page of error states.
+  const me = await api.getMyTenant().catch(() => null);
+  if (me?.type === "CUSTOMER") redirect("/track");
+
   let error: string | null = null;
   const [monitor, page, corridors, exceptions, tenant] = await Promise.all([
     api.systemMonitor().catch((e) => {

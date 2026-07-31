@@ -84,9 +84,26 @@ export const parties = pgTable(
     screeningStatus: screeningStatus("screening_status")
       .notNull()
       .default("UNSCREENED"),
+    /**
+     * Links this party to a CUSTOMER tenant, so the shipper can sign in and
+     * watch its own cargo.
+     *
+     * A shipper is a `parties` row inside the forwarder's tenant — it has no
+     * tenant of its own until someone gives it one. This column is that
+     * grant, and it is the *only* way data crosses a tenant boundary
+     * anywhere in the platform: the portal reads shipments belonging to the
+     * forwarder by way of the parties that point back at the caller. Null
+     * means no portal access, which is the default for every party.
+     */
+    customerTenantId: uuid("customer_tenant_id").references(() => tenants.id),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index("parties_tenant_idx").on(t.tenantId)],
+  (t) => [
+    index("parties_tenant_idx").on(t.tenantId),
+    // The portal's every query starts by resolving this; without the index
+    // it is a sequential scan of every party on the platform.
+    index("parties_customer_tenant_idx").on(t.customerTenantId),
+  ],
 );
 
 export const shipmentParties = pgTable(

@@ -217,6 +217,17 @@ export interface FinanceViews {
 
 export type TenantType = "OPERATOR" | "PARTNER_AGENT" | "CUSTOMER";
 
+/**
+ * What a shipper sees of its own cargo. Deliberately a subset of the operator
+ * view — no margin, no carrier buy rates, no other customers.
+ */
+export interface PortalTimelineEvent {
+  eventId: string;
+  type: string;
+  occurredAt: string;
+  payload: Record<string, unknown>;
+}
+
 export interface Tenant {
   id: string;
   type: TenantType;

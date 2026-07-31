@@ -1,6 +1,7 @@
 import { cookies } from "next/headers";
 import { EncryptJWT, jwtDecrypt } from "jose";
 import { authConfig, type AuthConfig } from "./auth-config";
+import type { TenantType } from "./types";
 
 /**
  * The console session.
@@ -32,6 +33,13 @@ export interface Session {
   tenantId: string;
   tenantLabel: string;
   userId: string;
+  /**
+   * Resolved once at sign-in and carried in the cookie so the middleware can
+   * route by it without an API round trip on every navigation. The API remains
+   * the authority on what the tenant may actually read; this only decides
+   * which screens the console will render.
+   */
+  tenantType: TenantType;
   /** Which auth mode minted this session — a dev cookie must never be honoured under oidc. */
   mode: "oidc" | "dev";
   tokens?: SessionTokens;
@@ -88,6 +96,10 @@ export async function openSession(sealed: string): Promise<Session | null> {
     const { payload } = await jwtDecrypt(sealed, await keyFor(cfg));
     const session = payload as unknown as Session;
     if (!session.tenantId || !session.userId) return null;
+    // A cookie minted before tenant type was recorded cannot be routed safely
+    // — treat it as no session rather than guessing, and let the sign-in flow
+    // mint a complete one.
+    if (!session.tenantType) return null;
     // A cookie minted under dev mode must not authenticate anything once the
     // deployment has been switched to oidc, and vice versa.
     if (session.mode !== cfg.mode) return null;
