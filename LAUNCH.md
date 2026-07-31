@@ -189,17 +189,74 @@ Unit and integration suites are split by config (`vitest.config.ts` vs
 started and `pnpm test:integration` needs `DATABASE_URL`. Totals after this
 pass: **139 unit tests + 16 integration tests**, lint/typecheck/build clean.
 
+## Console authentication (this round)
+
+The audit's blocker: the API refuses to boot without `AUTH_MODE=jwt` in
+production, but the console only knew how to send `x-dev-*` headers, so every
+page would have 401'd against a production API. There was no OIDC flow, no
+token storage, no refresh. The console is now a real OIDC client.
+
+- **Authorization code + PKCE** against Keycloak, written directly against the
+  OIDC endpoints (`lib/oidc.ts`) rather than pulling in an auth framework —
+  the console needs exactly three operations, and the token shape is already
+  what the API's verifier expects. PKCE is used even for confidential clients.
+- **Encrypted session cookie** (`lib/session.ts`): JWE, A256GCM, keyed off
+  `SESSION_SECRET`. Signed-only would leave a working bearer token legible to
+  anything that can read the cookie. The cookie also records which mode minted
+  it, so a dev-mode cookie stops authenticating the moment a deployment
+  switches to OIDC, and sealing fails loudly rather than emitting a cookie
+  over the browser's 4 KB limit that would be silently dropped.
+- **Refresh in middleware**, not at the point of use: Server Components cannot
+  set cookies, so a refresh discovered mid-render would have nowhere to
+  persist. Middleware refreshes ~60s ahead of expiry, writes the new cookie,
+  and rewrites the *request* cookie so the render below sees the fresh token
+  in the same pass.
+- **Dev mode kept**, and hardened: `POST /api/session` now 404s under OIDC, so
+  a production deployment can't be talked into minting a credential-free
+  session, and `AUTH_MODE=dev` throws outright when `NODE_ENV=production`.
+- Sign-out goes through Keycloak's end-session endpoint rather than only
+  dropping the local cookie.
+
+**Pre-existing bug found while testing this**: `apps/web/middleware.ts` had
+never executed. With a `src/` directory present, Next.js looks for middleware
+at `src/middleware.ts`, so the file at the app root was silently unregistered
+— the only thing keeping unauthenticated requests out was the belt-and-braces
+`redirect("/login")` in the app layout. Moved to `apps/web/src/middleware.ts`;
+the redirect now carries `?next=`, which is how the dead code was spotted.
+
+**Verified end to end** against a stub OIDC provider that enforces PKCE:
+sign-in redirects with an S256 challenge, the callback exchanges the code and
+seals a session whose tenant comes from the access token's claim, the proxy
+sends `Authorization: Bearer` (confirmed by the dev-mode API rejecting it with
+401 — proof the `x-dev-*` headers are gone), the token refreshes ahead of
+expiry without refreshing needlessly while fresh, and logout redirects to the
+provider's end-session endpoint. Dev mode re-verified unchanged afterwards.
+40 unit tests cover mode resolution, PKCE (including the RFC 7636 vector),
+discovery fallback, claim extraction, open-redirect rejection, cookie
+encryption, mode confusion, and the refresh window.
+
 ## Must do before going live (operator action, not code)
 
 These aren't code gaps — they're steps whoever deploys this has to take
 themselves, because they depend on real infrastructure this repo can't
 provision on its own:
 
-1. **Keycloak realm**: create the `forge-freight` realm, a `tenant_id` claim
-   mapper, and OIDC clients for the web app and any partner integrations.
-   `AUTH_MODE=dev` must never run in production — the config loader already
-   refuses this, but confirm `AUTH_ISSUER`/`AUTH_JWKS_URL` point at the real
-   realm before cutover.
+1. **Keycloak realm**: create the `forge-freight` realm and a `tenant_id`
+   claim mapper on the **access** token (the console and the API both read the
+   tenant from there — an ID-token-only mapper leaves the console signed in
+   but unable to name a tenant, and it says so on the login page rather than
+   failing silently). Create two clients:
+   - `forge-console` for the web app — standard flow on, PKCE (S256)
+     required, redirect URI `https://<console-host>/api/auth/callback`, and
+     post-logout redirect `https://<console-host>/login`. Public or
+     confidential both work; set `AUTH_CLIENT_SECRET` only for the latter.
+   - one client per partner/machine integration that calls the API directly.
+
+   Then set `AUTH_MODE`, `AUTH_ISSUER`, `AUTH_CLIENT_ID` and a 32+ character
+   `SESSION_SECRET` (`openssl rand -base64 48`) on the web service. Behind a
+   load balancer, also set `AUTH_PUBLIC_ORIGIN`/`AUTH_REDIRECT_URI` so the
+   redirect URI the console sends matches what Keycloak has registered.
+   `AUTH_MODE=dev` is refused in production by both services.
 2. **TLS**: put a reverse proxy (Caddy/Traefik) in front of `api:3001` and
    `web:3000`. Neither container terminates TLS itself.
 3. **Secrets**: `INGEST_API_KEY`, `ANTHROPIC_API_KEY`, Postgres credentials,

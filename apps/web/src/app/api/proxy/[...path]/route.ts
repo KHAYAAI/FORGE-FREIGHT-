@@ -1,22 +1,20 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { getSession } from "@/lib/session";
+import { authHeaders, getSession } from "@/lib/session";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
 
 /**
  * Same-origin proxy: client components fetch("/api/proxy/...") instead of
- * hitting the NestJS API directly, so the dev-session cookie never has to
- * leave the server and no CORS configuration is needed for browser calls.
- * Swapping to production Keycloak auth means forwarding an Authorization
- * header here instead of x-dev-* — one file to change.
+ * hitting the NestJS API directly, so the session cookie never has to leave
+ * the server and no CORS configuration is needed for browser calls.
+ *
+ * Which credential goes out is `authHeaders`' decision, not this file's — a
+ * Keycloak bearer under OIDC, x-dev-* headers in dev mode. The access token
+ * is refreshed in middleware before the request reaches here.
  */
 async function forward(req: NextRequest, path: string[]) {
   const session = await getSession();
-  const headers: Record<string, string> = {};
-  if (session) {
-    headers["x-dev-tenant-id"] = session.tenantId;
-    headers["x-dev-user-id"] = session.userId;
-  }
+  const headers: Record<string, string> = { ...authHeaders(session) };
 
   const contentType = req.headers.get("content-type");
   let body: BodyInit | undefined;

@@ -1,4 +1,4 @@
-import { getSession } from "./session";
+import { authHeaders, getSession } from "./session";
 import type {
   ClassificationCandidate,
   Corridor,
@@ -40,14 +40,7 @@ export class ApiError extends Error {
 
 async function headers(extra?: Record<string, string>): Promise<HeadersInit> {
   const session = await getSession();
-  const h: Record<string, string> = { ...extra };
-  if (session) {
-    h["x-dev-tenant-id"] = session.tenantId;
-    h["x-dev-user-id"] = session.userId;
-  } else if (process.env.NEXT_PUBLIC_DEV_TENANT_ID) {
-    h["x-dev-tenant-id"] = process.env.NEXT_PUBLIC_DEV_TENANT_ID;
-  }
-  return h;
+  return { ...extra, ...authHeaders(session) };
 }
 
 export async function apiGet<T>(path: string): Promise<T> {

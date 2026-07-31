@@ -1,41 +1,44 @@
-"use client";
+import { Suspense } from "react";
+import { authConfig } from "@/lib/auth-config";
+import { safeNextPath } from "@/lib/auth-flow";
+import { DevLoginForm } from "@/components/forms/dev-login-form";
 
-import { useRouter, useSearchParams } from "next/navigation";
-import { type FormEvent, Suspense, useState } from "react";
-import { Button } from "@/components/ui/button";
-import { Field, Input } from "@/components/ui/field";
+export const dynamic = "force-dynamic";
 
-function LoginForm() {
-  const router = useRouter();
-  const params = useSearchParams();
-  const [tenantId, setTenantId] = useState("");
-  const [tenantLabel, setTenantLabel] = useState("FORGE Freight — Operator");
-  const [userId, setUserId] = useState("dev");
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-
-  async function submit(e: FormEvent) {
-    e.preventDefault();
-    setError(null);
-    if (!tenantId.trim()) {
-      setError("Tenant ID is required.");
-      return;
-    }
-    setBusy(true);
-    try {
-      const res = await fetch("/api/session", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ tenantId: tenantId.trim(), tenantLabel: tenantLabel.trim(), userId: userId.trim() || "dev" }),
-      });
-      if (!res.ok) throw new Error(await res.text());
-      router.push(params.get("next") ?? "/");
-      router.refresh();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-      setBusy(false);
-    }
+/**
+ * Human-readable rendering of the `error` query parameter the auth routes and
+ * middleware set. Anything unrecognised is shown verbatim — the OIDC layer
+ * puts genuinely useful configuration messages there (a missing tenant claim
+ * mapper, most often) and swallowing them would make setup guesswork.
+ */
+function describeError(code: string): string {
+  switch (code) {
+    case "session_expired":
+      return "Your session expired. Sign in again.";
+    case "state_mismatch":
+      return "Sign-in could not be verified. Start again from this page.";
+    case "expired":
+      return "Sign-in took too long and the request expired. Try again.";
+    case "no_code":
+    case "exchange_failed":
+      return "The identity provider did not complete sign-in. Try again.";
+    case "access_denied":
+      return "Sign-in was cancelled.";
+    case "not_configured":
+      return "Single sign-on is not configured on this deployment.";
+    default:
+      return code;
   }
+}
+
+export default async function LoginPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ next?: string; error?: string }>;
+}) {
+  const { next, error } = await searchParams;
+  const cfg = authConfig();
+  const target = safeNextPath(next);
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-canvas px-4">
@@ -52,57 +55,41 @@ function LoginForm() {
           </div>
         </div>
 
-        <div className="rounded border border-hairline bg-surface p-6 shadow-[var(--shadow-panel)]">
-          <div className="mb-1 text-[10.5px] font-semibold uppercase tracking-widest text-accent">
-            Session
+        {error && (
+          <div className="mb-4 rounded border border-[color-mix(in_srgb,var(--critical)_35%,transparent)] bg-critical-wash px-3 py-2 text-[12px] text-critical">
+            {describeError(error)}
           </div>
-          <h1 className="mb-5 text-[16px] font-semibold text-primary">Sign in to the console</h1>
+        )}
 
-          <form onSubmit={submit} className="flex flex-col gap-4">
-            <Field
-              label="Tenant ID"
-              required
-              hint="UUID printed by `pnpm db:seed` as `operator`, or from docker compose logs."
+        {cfg.mode === "oidc" ? (
+          <div className="rounded border border-hairline bg-surface p-6 shadow-[var(--shadow-panel)]">
+            <div className="mb-1 text-[10.5px] font-semibold uppercase tracking-widest text-accent">
+              Session
+            </div>
+            <h1 className="mb-2 text-[16px] font-semibold text-primary">Sign in to the console</h1>
+            <p className="mb-5 text-[12px] text-secondary">
+              Authentication is handled by your organisation&apos;s identity provider. Your tenant
+              and permissions come from the token it issues.
+            </p>
+            <a
+              href={`/api/auth/login?next=${encodeURIComponent(target)}`}
+              className="flex h-10 w-full items-center justify-center rounded-sm bg-accent text-[13px] font-medium text-white transition-colors hover:bg-accent-strong"
             >
-              <Input
-                value={tenantId}
-                onChange={(e) => setTenantId(e.target.value)}
-                placeholder="00000000-0000-0000-0000-000000000000"
-                className="font-mono text-[12px]"
-                autoFocus
-              />
-            </Field>
-            <Field label="Tenant label" hint="Display name only — cosmetic.">
-              <Input value={tenantLabel} onChange={(e) => setTenantLabel(e.target.value)} />
-            </Field>
-            <Field label="User ID" hint="Actor recorded on events you create.">
-              <Input value={userId} onChange={(e) => setUserId(e.target.value)} />
-            </Field>
-
-            {error && (
-              <div className="rounded border border-[color-mix(in_srgb,var(--critical)_35%,transparent)] bg-critical-wash px-3 py-2 text-[12px] text-critical">
-                {error}
-              </div>
-            )}
-
-            <Button type="submit" variant="primary" size="lg" disabled={busy} className="mt-1">
-              {busy ? "Signing in…" : "Enter console"}
-            </Button>
-          </form>
-        </div>
+              Continue with single sign-on
+            </a>
+          </div>
+        ) : (
+          <Suspense>
+            <DevLoginForm />
+          </Suspense>
+        )}
 
         <p className="mt-4 text-center text-[11px] text-tertiary">
-          Dev-mode session (AUTH_MODE=dev). Production authenticates via Keycloak.
+          {cfg.mode === "oidc"
+            ? "Single sign-on (AUTH_MODE=oidc)."
+            : "Dev-mode session (AUTH_MODE=dev) — no credential is checked. Production authenticates via Keycloak."}
         </p>
       </div>
     </div>
-  );
-}
-
-export default function LoginPage() {
-  return (
-    <Suspense>
-      <LoginForm />
-    </Suspense>
   );
 }

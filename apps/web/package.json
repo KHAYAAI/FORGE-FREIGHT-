@@ -1,7 +1,7 @@
 {
   "name": "@forge-freight/web",
   "version": "0.1.0",
-  "description": "FORGE Freight web \u2014 customer portal, ops console, partner console as three faces of one app.",
+  "description": "FORGE Freight web — customer portal, ops console, partner console as three faces of one app.",
   "private": true,
   "scripts": {
     "dev": "next dev -p 3000",
@@ -13,6 +13,7 @@
   "dependencies": {
     "@tailwindcss/postcss": "^4.3.2",
     "clsx": "^2.1.1",
+    "jose": "^6.2.3",
     "lucide-react": "^1.24.0",
     "next": "^15.1.3",
     "react": "^19.0.0",
