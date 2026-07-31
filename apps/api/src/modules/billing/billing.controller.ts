@@ -7,9 +7,9 @@ import {
   ParseUUIDPipe,
   Post,
 } from "@nestjs/common";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { z } from "zod";
-import { charges, invoices, type Db } from "@forge-freight/db";
+import { charges, invoices, payments, type Db } from "@forge-freight/db";
 import type { AuthContext } from "../auth/auth.types.js";
 import { CurrentAuth } from "../auth/current-auth.decorator.js";
 import { DB } from "../db/db.module.js";
@@ -17,8 +17,14 @@ import { BillingService } from "./billing.service.js";
 
 const PaymentDto = z.object({
   amountCents: z.number().int().positive(),
-  currency: z.string().length(3),
-  paymentRef: z.string().min(1).max(100),
+  currency: z.string().trim().toUpperCase().length(3),
+  /**
+   * The bank's or gateway's reference. Required, and unique per invoice —
+   * it is what makes a redelivered webhook a no-op rather than a second
+   * credit, so there is deliberately no way to record a payment without one.
+   */
+  paymentRef: z.string().trim().min(1).max(100),
+  receivedAt: z.coerce.date().optional(),
 });
 
 @Controller()
@@ -53,14 +59,38 @@ export class BillingController {
       );
   }
 
+  /**
+   * Invoices with what has actually been paid against each one. The console
+   * showed a total and a status but no running balance, so "how much is still
+   * owed on this?" was a question the screen could not answer.
+   */
   @Get("invoices")
   async list(@CurrentAuth() auth: AuthContext) {
-    return this.db
-      .select()
+    const rows = await this.db
+      .select({
+        invoice: invoices,
+        paidCents: sql<number>`coalesce(sum(${payments.amountCents}), 0)::bigint`.mapWith(Number),
+      })
       .from(invoices)
+      .leftJoin(payments, eq(payments.invoiceId, invoices.id))
       .where(eq(invoices.tenantId, auth.tenantId))
+      .groupBy(invoices.id)
       .orderBy(desc(invoices.createdAt))
       .limit(200);
+
+    return rows.map(({ invoice, paidCents }) => ({
+      ...invoice,
+      paidCents,
+      outstandingCents: invoice.totalCents - paidCents,
+    }));
+  }
+
+  @Get("invoices/:id/payments")
+  async payments(
+    @Param("id", ParseUUIDPipe) invoiceId: string,
+    @CurrentAuth() auth: AuthContext,
+  ) {
+    return this.billing.listPayments(invoiceId, auth.tenantId);
   }
 
   @Post("invoices/:id/payments")

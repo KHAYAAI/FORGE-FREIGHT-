@@ -10,6 +10,8 @@ import type {
   Party,
   Quote,
   MarginRule,
+  Payment,
+  PaymentResult,
   RateCard,
   RateSurcharge,
   Shipment,
@@ -111,7 +113,8 @@ export const clientApi = {
 
   issueInvoices: (shipmentId: string) => post<Invoice[]>(`/shipments/${shipmentId}/invoices`),
   recordPayment: (invoiceId: string, body: { amountCents: number; currency: string; paymentRef: string }) =>
-    post<Invoice>(`/invoices/${invoiceId}/payments`, body),
+    post<PaymentResult>(`/invoices/${invoiceId}/payments`, body),
+  listPayments: (invoiceId: string) => get<Payment[]>(`/invoices/${invoiceId}/payments`),
   financeViews: () => get<FinanceViews>("/finance/views"),
 
   createPartner: (body: { name: string; platformFeeBps: number }) =>

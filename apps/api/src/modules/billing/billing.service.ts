@@ -4,12 +4,13 @@ import {
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, lt, sql } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import {
   charges,
   invoices,
   ledgerEvents,
+  payments,
   shipments,
   type Db,
 } from "@forge-freight/db";
@@ -135,6 +136,8 @@ export class BillingService {
     amountCents: number;
     currency: string;
     paymentRef: string;
+    /** When the money actually landed; defaults to now. */
+    receivedAt?: Date;
     actor: EventActor;
   }) {
     const [invoice] = await this.db
@@ -150,30 +153,117 @@ export class BillingService {
       );
     }
 
-    const newStatus =
-      params.amountCents >= invoice.totalCents ? "PAID" : "PART_PAID";
+    if (invoice.status === "CANCELLED") {
+      throw new ConflictException(`Invoice ${invoice.number} is cancelled and cannot be paid`);
+    }
 
-    await this.db.transaction(async (tx) => {
-      await tx
-        .update(invoices)
-        .set({ status: newStatus })
-        .where(eq(invoices.id, invoice.id));
-      await appendEvent(
-        tx,
-        makeEvent({
-          definition: PaymentReceived,
+    return this.db.transaction(async (tx) => {
+      // The reference is the bank's, and banks redeliver. Doing nothing on
+      // conflict makes a replayed webhook a no-op instead of double-crediting
+      // the customer.
+      const inserted = await tx
+        .insert(payments)
+        .values({
           tenantId: params.tenantId,
-          actor: params.actor,
-          shipmentId: invoice.shipmentId,
-          payload: {
-            invoiceId: invoice.id,
-            amount: { amountCents: params.amountCents, currency: params.currency },
-            paymentRef: params.paymentRef,
-          },
-        }),
-      );
+          invoiceId: invoice.id,
+          amountCents: params.amountCents,
+          currency: params.currency,
+          paymentRef: params.paymentRef,
+          receivedAt: params.receivedAt ?? new Date(),
+        })
+        .onConflictDoNothing({ target: [payments.invoiceId, payments.paymentRef] })
+        .returning();
+
+      const [totals] = await tx
+        .select({ paid: sql<number>`coalesce(sum(${payments.amountCents}), 0)::bigint`.mapWith(Number) })
+        .from(payments)
+        .where(eq(payments.invoiceId, invoice.id));
+      const paidCents = totals?.paid ?? 0;
+      const outstandingCents = invoice.totalCents - paidCents;
+
+      // Settlement is decided by the running total, not by this one payment:
+      // two half payments used to leave an invoice PART_PAID forever.
+      //
+      // A part payment does not cure lateness. Moving an overdue invoice to
+      // PART_PAID would drop it off the overdue list the moment a customer
+      // paid a token amount — and the hourly sweep would put it back, so the
+      // screen would flicker between two answers for the same invoice.
+      const stillLate = invoice.dueDate < new Date();
+      const status =
+        paidCents >= invoice.totalCents
+          ? "PAID"
+          : paidCents > 0
+            ? stillLate
+              ? "OVERDUE"
+              : "PART_PAID"
+            : invoice.status;
+
+      if (status !== invoice.status) {
+        await tx.update(invoices).set({ status }).where(eq(invoices.id, invoice.id));
+      }
+
+      // A duplicate reference changed nothing, so it emits nothing — a second
+      // `payment.received` would reach the ledger sink and the customer's
+      // notifications as though money had arrived twice.
+      if (inserted.length > 0) {
+        await appendEvent(
+          tx,
+          makeEvent({
+            definition: PaymentReceived,
+            tenantId: params.tenantId,
+            actor: params.actor,
+            shipmentId: invoice.shipmentId,
+            payload: {
+              invoiceId: invoice.id,
+              amount: { amountCents: params.amountCents, currency: params.currency },
+              paymentRef: params.paymentRef,
+            },
+          }),
+        );
+      }
+
+      return {
+        invoiceId: invoice.id,
+        status,
+        paidCents,
+        outstandingCents,
+        /** Negative outstanding is money to refund, not revenue — surface it. */
+        overpaidCents: outstandingCents < 0 ? -outstandingCents : 0,
+        duplicate: inserted.length === 0,
+      };
     });
-    return { invoiceId: invoice.id, status: newStatus };
+  }
+
+  /** Every payment recorded against an invoice, oldest first. */
+  async listPayments(invoiceId: string, tenantId: string) {
+    return this.db
+      .select()
+      .from(payments)
+      .where(and(eq(payments.invoiceId, invoiceId), eq(payments.tenantId, tenantId)))
+      .orderBy(asc(payments.receivedAt));
+  }
+
+  /**
+   * Move unsettled invoices past their due date to OVERDUE.
+   *
+   * The status existed in the enum and the console already rendered it as a
+   * red badge with its own filter — but nothing ever set it, so the overdue
+   * count was permanently zero and the screen quietly lied. Runs as a sweep
+   * rather than being computed on read because the status is a stored column
+   * that the ledger feed and notifications both key off.
+   */
+  async markOverdue(now = new Date()): Promise<number> {
+    const updated = await this.db
+      .update(invoices)
+      .set({ status: "OVERDUE" })
+      .where(
+        and(
+          inArray(invoices.status, ["ISSUED", "PART_PAID"]),
+          lt(invoices.dueDate, now),
+        ),
+      )
+      .returning({ id: invoices.id });
+    return updated.length;
   }
 
   /**

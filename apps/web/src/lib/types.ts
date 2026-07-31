@@ -182,10 +182,36 @@ export interface Invoice {
   shipmentId: string | null;
   number: string;
   status: InvoiceStatus;
-  totalCents: string;
+  totalCents: number;
   currency: string;
   dueDate: string;
   createdAt: string;
+  /** Sum of payments recorded against this invoice. Absent on the portal feed. */
+  paidCents?: number;
+  /** Negative when the customer has overpaid — money to refund, not revenue. */
+  outstandingCents?: number;
+}
+
+export interface Payment {
+  id: string;
+  tenantId: string;
+  invoiceId: string;
+  amountCents: number;
+  currency: string;
+  /** The bank's reference. Unique per invoice — this is the idempotency key. */
+  paymentRef: string;
+  receivedAt: string;
+  createdAt: string;
+}
+
+export interface PaymentResult {
+  invoiceId: string;
+  status: InvoiceStatus;
+  paidCents: number;
+  outstandingCents: number;
+  overpaidCents: number;
+  /** True when this reference had already been applied and nothing changed. */
+  duplicate: boolean;
 }
 
 export interface Charge {

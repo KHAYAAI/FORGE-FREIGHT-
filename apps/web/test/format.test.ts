@@ -4,20 +4,22 @@ import { fmtDate, money, relativeTime } from "@/lib/format";
 afterEach(() => vi.useRealTimers());
 
 /**
- * `money` delegates to `toLocaleString("en-ZA")`, whose separators depend on
- * the runtime's ICU data - en-ZA renders decimals with a comma on some builds
- * and a period on others. These assert the invariants that actually matter on
- * an invoice (currency prefix, exactly two fraction digits, never NaN) rather
- * than pinning a separator the platform is entitled to choose.
+ * `money` used to delegate to `toLocaleString("en-ZA")`, whose separators
+ * depend on the runtime's ICU build — which meant the invoices screen showed
+ * `ZAR 8 700,00` in a server-rendered tile and `ZAR 4,500.00` in the table
+ * rows beside it. It formats by hand now, so these pin the exact output: a
+ * separator that varies between server and client is a hydration mismatch,
+ * not a platform choice to be tolerated.
  */
-const TWO_DECIMALS = /^[A-Z]{3} [\d\s\u00a0\u202f,.]*\d[.,]\d{2}$/;
-
 describe("money", () => {
-  it("renders cents as a two-decimal amount with its currency", () => {
-    const out = money(123456, "ZAR");
-    expect(out).toMatch(TWO_DECIMALS);
-    expect(out.startsWith("ZAR ")).toBe(true);
-    expect(out).toMatch(/1[\s\u00a0\u202f,.]?234/);
+  it("formats identically wherever it runs", () => {
+    expect(money(123456, "ZAR")).toBe("ZAR 1,234.56");
+    expect(money(870000, "ZAR")).toBe("ZAR 8,700.00");
+    expect(money(100, "USD")).toBe("USD 1.00");
+  });
+
+  it("groups large amounts every three digits", () => {
+    expect(money(123456789012, "USD")).toBe("USD 1,234,567,890.12");
   });
 
   it("accepts the string cents the API returns for bigint columns", () => {
@@ -26,13 +28,17 @@ describe("money", () => {
 
   it("treats a missing amount as zero rather than NaN", () => {
     // A charge with no value must read "0.00", never "NaN" on an invoice.
-    expect(money(null, "ZAR")).toMatch(/^ZAR 0[.,]00$/);
-    expect(money(undefined, "ZAR")).toMatch(/^ZAR 0[.,]00$/);
-    expect(money(null, "ZAR")).not.toContain("NaN");
+    expect(money(null, "ZAR")).toBe("ZAR 0.00");
+    expect(money(undefined, "ZAR")).toBe("ZAR 0.00");
   });
 
   it("keeps sub-cent precision out of the output", () => {
-    expect(money(1, "USD")).toMatch(/^USD 0[.,]01$/);
+    expect(money(1, "USD")).toBe("USD 0.01");
+  });
+
+  it("puts the sign before the digits, not inside the grouping", () => {
+    // An overpaid invoice shows a negative outstanding balance.
+    expect(money(-123456, "ZAR")).toBe("ZAR -1,234.56");
   });
 });
 

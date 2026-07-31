@@ -509,6 +509,41 @@ export const invoices = pgTable("invoices", {
 });
 
 /**
+ * Money actually received against an invoice.
+ *
+ * Payments used to exist only as events, and the invoice's status was decided
+ * by comparing a single payment against the whole total — so two half
+ * payments left an invoice `PART_PAID` forever, and a redelivered payment
+ * webhook was counted twice. The running total has to be a row someone can
+ * sum.
+ *
+ * `payment_ref` is the bank's or gateway's reference. Unique per invoice
+ * rather than per tenant, deliberately: a single bank transfer settling
+ * several invoices is an allocation problem this table does not model, and a
+ * tenant-wide constraint would reject the second allocation as a duplicate.
+ * Within one invoice, the same reference twice is always a redelivery.
+ */
+export const payments = pgTable(
+  "payments",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id").notNull().references(() => tenants.id),
+    invoiceId: uuid("invoice_id")
+      .notNull()
+      .references(() => invoices.id, { onDelete: "cascade" }),
+    amountCents: bigint("amount_cents", { mode: "number" }).notNull(),
+    currency: text("currency").notNull(),
+    paymentRef: text("payment_ref").notNull(),
+    receivedAt: timestamp("received_at", { withTimezone: true }).notNull().defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("payments_invoice_ref_idx").on(t.invoiceId, t.paymentRef),
+    index("payments_invoice_idx").on(t.invoiceId),
+  ],
+);
+
+/**
  * Revenue Ontology feed: ledger events produced by the ontology bridge from
  * financial freight events. ForgePay consumes this; the trade-finance views
  * (duty-financing eligibility, factoring status) are computed over it.
