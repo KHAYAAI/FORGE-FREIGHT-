@@ -14,6 +14,7 @@ import { z } from "zod";
 import { charges, shipments, tenants, type Db } from "@forge-freight/db";
 import type { AuthContext } from "../auth/auth.types.js";
 import { CurrentAuth } from "../auth/current-auth.decorator.js";
+import { RequireRoles } from "../auth/roles.js";
 import { DB } from "../db/db.module.js";
 
 const CreatePartnerDto = z.object({
@@ -103,6 +104,7 @@ export class TenantsController {
     }));
   }
 
+  @RequireRoles("admin")
   @Post("partners")
   async createPartner(@Body() body: unknown, @CurrentAuth() auth: AuthContext) {
     await this.assertOperator(auth.tenantId);
@@ -114,6 +116,7 @@ export class TenantsController {
     return partner;
   }
 
+  @RequireRoles("admin")
   @Patch("partners/:id/fee-rate")
   async updateFeeRate(
     @Param("id", ParseUUIDPipe) id: string,

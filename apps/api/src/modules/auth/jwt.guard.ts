@@ -40,7 +40,7 @@ export class JwtAuthGuard implements CanActivate {
       const auth: AuthContext = {
         tenantId,
         userId: req.header("x-dev-user-id") ?? "dev",
-        roles: (req.header("x-dev-roles") ?? "ops").split(","),
+        roles: (req.header("x-dev-roles") ?? "admin,finance,ops").split(","),
       };
       (req as Request & Record<string, unknown>)[AUTH_CONTEXT_KEY] = auth;
       return true;

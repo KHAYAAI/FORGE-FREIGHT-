@@ -187,7 +187,7 @@ quoting was the one path that didn't. Covered by
 Unit and integration suites are split by config (`vitest.config.ts` vs
 `vitest.integration.config.ts`), so `pnpm test` still runs with no services
 started and `pnpm test:integration` needs `DATABASE_URL`. Totals as of the
-latest pass: **216 unit tests (106 API + 98 web + 12 packages) + 56 integration
+latest pass: **224 unit tests (114 API + 98 web + 12 packages) + 56 integration
 tests**, lint/typecheck/build clean.
 
 ## Console authentication (this round)
@@ -413,13 +413,59 @@ integration tests, mutation-proven twice: restoring the per-payment status
 comparison fails the accumulation test, and removing the conflict target fails
 both redelivery tests.
 
+## Role enforcement and the system-monitor gate (this round)
+
+`AuthContext.roles` was parsed off the token from the first commit and then
+never read by anything, so every authenticated user of a tenant could reprice a
+lane, onboard a partner, or record a payment. Separately, the system monitor
+showed two platform-wide figures to every caller: the outbox backlog counted
+*every* tenant's unpublished events, and consumer offsets are a single global
+table — so a partner agent could read how far behind the platform's projectors
+were and infer the whole network's throughput from a screen meant to show its
+own queue depth.
+
+- **Three roles, deliberately few** (`apps/api/src/modules/auth/roles.ts`):
+  `admin` changes what the business is (prices, margins, partners, and which
+  customer tenant may see which party's cargo), `finance` moves money (issuing
+  invoices, recording payments), `ops` moves freight. `admin` is accepted
+  everywhere without being listed — an administrator who cannot record a
+  payment on a Friday afternoon borrows a finance login, and then the audit
+  trail is a lie.
+- **Reads are not role-gated.** A forwarder is a small team; hiding the
+  shipment list from a colleague protects nobody and gets worked around with a
+  shared login, which is worse than the thing it was guarding.
+- **`AUTH_ROLES=advisory`** logs what would have been refused instead of
+  refusing it. Enforcing by default is right, but an upgrade into a realm with
+  no role mapper would otherwise lose every write at once — this lets a
+  deployment see exactly which calls would fail before committing.
+- **System monitor**: refuses customer tenants outright, scopes the outbox
+  backlog to the caller's own tenant, and returns platform infrastructure
+  health and consumer watermarks to the operator only. Non-operators get an
+  empty consumers list rather than our projector names reported "healthy" on no
+  data — that would be telling a partner about our internals and telling them
+  something untrue at the same time.
+
+**Bug found by running it, not by testing it**: the guard 500'd on every
+request because `Reflector` was injected implicitly. `tsx`'s esbuild transform
+drops `emitDecoratorMetadata`, so a constructor parameter without an explicit
+`@Inject()` resolves to `undefined` at runtime rather than failing at boot —
+the same class of failure this repo hit once before across seven
+controllers. A hand-constructed unit test cannot see it, which is why the live
+call mattered.
+
+**Verified live**: an `ops` user is refused a rate card (403 naming the role it
+needs and the roles it has) and refused a payment; a `finance` user gets
+through to a genuine 404; an `admin` writes the card; reads stay open to `ops`;
+and the monitor returns `infra` + 4 consumers + a tenant-scoped backlog of 24
+to the operator, against `null` + 0 consumers + 6 to a partner agent.
+
 ## Must do before going live (operator action, not code)
 
 These aren't code gaps — they're steps whoever deploys this has to take
 themselves, because they depend on real infrastructure this repo can't
 provision on its own:
 
-1. **Keycloak realm**: create the `forge-freight` realm and a `tenant_id`
+1. **Keycloak realm**: create the `forge-freight` realm, a `tenant_id`
    claim mapper on the **access** token (the console and the API both read the
    tenant from there — an ID-token-only mapper leaves the console signed in
    but unable to name a tenant, and it says so on the login page rather than
@@ -429,6 +475,10 @@ provision on its own:
      post-logout redirect `https://<console-host>/login`. Public or
      confidential both work; set `AUTH_CLIENT_SECRET` only for the latter.
    - one client per partner/machine integration that calls the API directly.
+
+   Map the realm roles `admin`, `finance` and `ops` onto the access token as
+   well — the API refuses writes without them. Set `AUTH_ROLES=advisory` first
+   if you want to see what would be refused before enforcing it.
 
    Then set `AUTH_MODE`, `AUTH_ISSUER`, `AUTH_CLIENT_ID` and a 32+ character
    `SESSION_SECRET` (`openssl rand -base64 48`) on the web service. Behind a

@@ -16,6 +16,7 @@ import type { Db } from "@forge-freight/db";
 import type { AuthContext } from "../auth/auth.types.js";
 import { COMMERCIAL_TENANTS, requireTenantType } from "../auth/tenant-type.js";
 import { CurrentAuth } from "../auth/current-auth.decorator.js";
+import { RequireRoles } from "../auth/roles.js";
 import { DB } from "../db/db.module.js";
 import {
   CreateMarginRuleDto,
@@ -74,12 +75,14 @@ export class RatesController {
     return this.rates.getCard(auth.tenantId, id);
   }
 
+  @RequireRoles("admin")
   @Post("cards")
   async createCard(@Body() body: unknown, @CurrentAuth() auth: AuthContext) {
     await this.assertCommercial(auth);
     return this.rates.createCard(auth.tenantId, CreateRateCardDto.parse(body));
   }
 
+  @RequireRoles("admin")
   @Patch("cards/:id")
   async updateCard(
     @Param("id", ParseUUIDPipe) id: string,
@@ -91,6 +94,7 @@ export class RatesController {
   }
 
   /** Replaces the card's whole surcharge set — see the note on the service method. */
+  @RequireRoles("admin")
   @Put("cards/:id/surcharges")
   async replaceSurcharges(
     @Param("id", ParseUUIDPipe) id: string,
@@ -102,6 +106,7 @@ export class RatesController {
     return this.rates.replaceSurcharges(auth.tenantId, id, dto.surcharges);
   }
 
+  @RequireRoles("admin")
   @Delete("cards/:id")
   @HttpCode(204)
   async deleteCard(@Param("id", ParseUUIDPipe) id: string, @CurrentAuth() auth: AuthContext) {
@@ -115,12 +120,14 @@ export class RatesController {
     return this.rates.listMarginRules(auth.tenantId);
   }
 
+  @RequireRoles("admin")
   @Post("margin-rules")
   async createMarginRule(@Body() body: unknown, @CurrentAuth() auth: AuthContext) {
     await this.assertCommercial(auth);
     return this.rates.createMarginRule(auth.tenantId, CreateMarginRuleDto.parse(body));
   }
 
+  @RequireRoles("admin")
   @Patch("margin-rules/:id")
   async updateMarginRule(
     @Param("id", ParseUUIDPipe) id: string,
@@ -131,6 +138,7 @@ export class RatesController {
     return this.rates.updateMarginRule(auth.tenantId, id, UpdateMarginRuleDto.parse(body));
   }
 
+  @RequireRoles("admin")
   @Delete("margin-rules/:id")
   @HttpCode(204)
   async deleteMarginRule(

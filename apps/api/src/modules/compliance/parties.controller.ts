@@ -15,6 +15,7 @@ import { z } from "zod";
 import { parties, tenants, type Db } from "@forge-freight/db";
 import type { AuthContext } from "../auth/auth.types.js";
 import { CurrentAuth } from "../auth/current-auth.decorator.js";
+import { RequireRoles } from "../auth/roles.js";
 import { DB } from "../db/db.module.js";
 import { ScreeningService } from "./screening.service.js";
 
@@ -96,6 +97,7 @@ export class PartiesController {
    *
    * Pass `customerTenantId: null` to revoke.
    */
+  @RequireRoles("admin")
   @Post(":id/customer-tenant")
   async linkCustomerTenant(
     @Param("id", ParseUUIDPipe) id: string,

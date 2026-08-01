@@ -298,12 +298,13 @@ export interface PlatformFees {
 
 export interface SystemMonitor {
   generatedAt: string;
+  /** Platform health is the operator's; a partner agent gets null here. */
   infra: {
     database: boolean;
     kafkaConfigured: boolean;
     temporalConfigured: boolean;
     outboxPollMs: number;
-  };
+  } | null;
   events: {
     total: number;
     lastHour: number;

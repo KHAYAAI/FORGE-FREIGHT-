@@ -12,6 +12,7 @@ import { z } from "zod";
 import { charges, invoices, payments, type Db } from "@forge-freight/db";
 import type { AuthContext } from "../auth/auth.types.js";
 import { CurrentAuth } from "../auth/current-auth.decorator.js";
+import { RequireRoles } from "../auth/roles.js";
 import { DB } from "../db/db.module.js";
 import { BillingService } from "./billing.service.js";
 
@@ -34,6 +35,7 @@ export class BillingController {
     @Inject(DB) private readonly db: Db,
   ) {}
 
+  @RequireRoles("finance")
   @Post("shipments/:id/invoices")
   async issue(
     @Param("id", ParseUUIDPipe) shipmentId: string,
@@ -93,6 +95,7 @@ export class BillingController {
     return this.billing.listPayments(invoiceId, auth.tenantId);
   }
 
+  @RequireRoles("finance")
   @Post("invoices/:id/payments")
   async pay(
     @Param("id", ParseUUIDPipe) invoiceId: string,

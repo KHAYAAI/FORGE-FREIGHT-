@@ -23,6 +23,13 @@ const ConfigSchema = z
     AUTH_AUDIENCE: z.string().optional(),
     /** JWT claim carrying the FORGE Freight tenant id. */
     AUTH_TENANT_CLAIM: z.string().default("tenant_id"),
+    /**
+     * `enforce` refuses a write whose token lacks the required realm role.
+     * `advisory` logs what would have been refused instead — an escape hatch
+     * for a deployment upgrading into a realm that has no role mapper yet,
+     * where enforcing immediately would lock every user out of every write.
+     */
+    AUTH_ROLES: z.enum(["enforce", "advisory"]).default("enforce"),
 
     /** Temporal server, e.g. localhost:7233. Empty = lifecycle timers disabled. */
     TEMPORAL_ADDRESS: z.string().default(""),

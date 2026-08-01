@@ -13,6 +13,7 @@ import {
 } from "@forge-freight/db";
 import type { AuthContext } from "../auth/auth.types.js";
 import { CurrentAuth } from "../auth/current-auth.decorator.js";
+import { COMMERCIAL_TENANTS, requireTenantType } from "../auth/tenant-type.js";
 import { CONFIG, type AppConfig } from "../../config.js";
 import { DB } from "../db/db.module.js";
 
@@ -37,8 +38,24 @@ export class SystemController {
     @Inject(CONFIG) private readonly cfg: AppConfig,
   ) {}
 
+  /**
+   * A tenant's own telemetry, plus platform health for the operator only.
+   *
+   * Two figures here used to be platform-wide for every caller: the outbox
+   * backlog counted every tenant's unpublished events, and the consumer
+   * offsets are a single global table. A partner agent could read how far
+   * behind the platform's projectors were and infer the whole network's
+   * throughput from a screen that was meant to show it its own queue depth.
+   */
   @Get("monitor")
   async monitor(@CurrentAuth() auth: AuthContext) {
+    const callerType = await requireTenantType(
+      this.db,
+      auth.tenantId,
+      COMMERCIAL_TENANTS,
+      "The system monitor is an operational surface.",
+    );
+    const isOperator = callerType === "OPERATOR";
     const [
       dbOk,
       eventTotals,
@@ -64,8 +81,11 @@ export class SystemController {
             gt(events.recordedAt, sql`now() - interval '1 hour'`),
           ),
         ),
-      this.db.select({ n: count() }).from(events).where(isNull(events.publishedAt)),
-      this.db.select().from(consumerOffsets),
+      this.db
+        .select({ n: count() })
+        .from(events)
+        .where(and(eq(events.tenantId, auth.tenantId), isNull(events.publishedAt))),
+      isOperator ? this.db.select().from(consumerOffsets) : Promise.resolve([]),
       this.db
         .select({ recordedAt: events.recordedAt })
         .from(events)
@@ -103,7 +123,10 @@ export class SystemController {
     ]);
 
     const now = Date.now();
-    const consumers = KNOWN_CONSUMERS.map((name) => {
+    // Empty rather than a list of platform projector names with null figures:
+    // naming our consumers and reporting them "healthy" on no data tells a
+    // partner about our internals and tells them something untrue at once.
+    const consumers = !isOperator ? [] : KNOWN_CONSUMERS.map((name) => {
       const row = offsets.find((o) => o.consumer === name);
       const lagMs = row ? now - new Date(row.lastRecordedAt).getTime() : null;
       return {
@@ -117,12 +140,15 @@ export class SystemController {
 
     return {
       generatedAt: new Date().toISOString(),
-      infra: {
-        database: dbOk,
-        kafkaConfigured: Boolean(this.cfg.KAFKA_BROKERS),
-        temporalConfigured: Boolean(this.cfg.TEMPORAL_ADDRESS),
-        outboxPollMs: this.cfg.OUTBOX_POLL_MS,
-      },
+      // Infrastructure state is the platform's, not a partner's business.
+      infra: isOperator
+        ? {
+            database: dbOk,
+            kafkaConfigured: Boolean(this.cfg.KAFKA_BROKERS),
+            temporalConfigured: Boolean(this.cfg.TEMPORAL_ADDRESS),
+            outboxPollMs: this.cfg.OUTBOX_POLL_MS,
+          }
+        : null,
       events: {
         total: eventTotals[0]?.n ?? 0,
         lastHour: eventsLastHour[0]?.n ?? 0,

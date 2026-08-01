@@ -87,18 +87,36 @@ export default async function SystemMonitorPage() {
           <div className="grid grid-cols-1 gap-4 xl:grid-cols-5">
             <Panel className="xl:col-span-2">
               <PanelHeader title="Infrastructure" />
-              <div className="flex flex-col gap-2">
-                <InfraLight label="Database" ok={monitor.infra.database} />
-                <InfraLight label="Kafka / Redpanda outbox" ok={monitor.infra.kafkaConfigured} />
-                <InfraLight label="Temporal workflows" ok={monitor.infra.temporalConfigured} />
-              </div>
-              <div className="mt-3 text-[11px] text-tertiary">
-                Outbox poll interval: <span className="tabular text-secondary">{monitor.infra.outboxPollMs}ms</span>
-              </div>
+              {monitor.infra ? (
+                <>
+                  <div className="flex flex-col gap-2">
+                    <InfraLight label="Database" ok={monitor.infra.database} />
+                    <InfraLight label="Kafka / Redpanda outbox" ok={monitor.infra.kafkaConfigured} />
+                    <InfraLight label="Temporal workflows" ok={monitor.infra.temporalConfigured} />
+                  </div>
+                  <div className="mt-3 text-[11px] text-tertiary">
+                    Outbox poll interval:{" "}
+                    <span className="tabular text-secondary">{monitor.infra.outboxPollMs}ms</span>
+                  </div>
+                </>
+              ) : (
+                /* Platform health belongs to whoever runs the platform. A
+                   partner sees its own queue depth above, not ours. */
+                <p className="text-[12px] text-tertiary">
+                  Platform infrastructure health is visible to the operator tenant only. The
+                  figures above are your own tenant&apos;s.
+                </p>
+              )}
             </Panel>
 
             <Panel className="xl:col-span-3">
               <PanelHeader title="Event consumers" eyebrow="Watermarked, replay-safe" />
+              {monitor.consumers.length === 0 ? (
+                <p className="text-[12px] text-tertiary">
+                  Consumer watermarks describe the platform&apos;s own projectors and are visible
+                  to the operator tenant only.
+                </p>
+              ) : (
               <Table>
                 <THead>
                   <TR>
@@ -125,6 +143,7 @@ export default async function SystemMonitorPage() {
                   ))}
                 </tbody>
               </Table>
+              )}
             </Panel>
           </div>
 
