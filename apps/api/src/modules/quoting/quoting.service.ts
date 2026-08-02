@@ -16,11 +16,14 @@ import {
 import { makeEvent, QuoteIssued, type EventActor } from "@forge-freight/events";
 import { DB } from "../db/db.module.js";
 import { appendEvent } from "../db/event-store.js";
+import { ConsignmentsService } from "../consignments/consignments.service.js";
 import { RatesService } from "../rates/rates.service.js";
+import type { CreateConsignment } from "../consignments/consignments.dto.js";
 import {
   buildQuote,
   NoMarginRuleError,
   NoRateError,
+  NoServiceLevelError,
   type MarginRuleInput,
   type QuoteRequest,
   type QuoteResult,
@@ -32,6 +35,9 @@ export interface IssueQuoteInput extends QuoteRequest {
     | "EXW" | "FCA" | "FAS" | "FOB" | "CFR" | "CIF"
     | "CPT" | "CIP" | "DAP" | "DPU" | "DDP";
   validityDays?: number;
+  /** Captured inline with the quote, or referenced if already recorded. */
+  consignment?: CreateConsignment;
+  consignmentId?: string;
   actor: EventActor;
 }
 
@@ -40,6 +46,7 @@ export class QuotingService {
   constructor(
     @Inject(DB) private readonly db: Db,
     @Inject(RatesService) private readonly rates: RatesService,
+    @Inject(ConsignmentsService) private readonly consignments: ConsignmentsService,
   ) {}
 
   /**
@@ -47,7 +54,16 @@ export class QuotingService {
    * and the event append happen in one transaction; the Redpanda publish is
    * done by the outbox relay reading the events table (transactional outbox).
    */
-  async issueQuote(input: IssueQuoteInput): Promise<{ quoteId: string; result: QuoteResult }> {
+  async issueQuote(input: IssueQuoteInput) {
+    // Capture what is actually being shipped before pricing it. Chargeable
+    // weight, handling uplift and the transit ceiling all come from here, so
+    // this has to happen first or the quote is priced on assumptions.
+    const consignment = input.consignment
+      ? await this.consignments.create(input.tenantId, input.consignment, input.mode)
+      : input.consignmentId
+        ? await this.consignments.get(input.tenantId, input.consignmentId)
+        : null;
+
     const cards = await this.rates.findForLane({
       tenantId: input.tenantId,
       origin: input.origin,
@@ -82,9 +98,22 @@ export class QuotingService {
     // and buries a real configuration gap under noise.
     let result: QuoteResult;
     try {
-      result = buildQuote(input, cards, rules);
+      result = buildQuote(
+        {
+          ...input,
+          cargoType: consignment?.cargoType,
+          urgency: consignment?.urgency,
+          chargeableWeightGrams: consignment?.chargeableWeightGrams,
+        },
+        cards,
+        rules,
+      );
     } catch (err) {
-      if (err instanceof NoRateError || err instanceof NoMarginRuleError) {
+      if (
+        err instanceof NoRateError ||
+        err instanceof NoMarginRuleError ||
+        err instanceof NoServiceLevelError
+      ) {
         throw new UnprocessableEntityException(err.message);
       }
       throw err;
@@ -136,6 +165,7 @@ export class QuotingService {
         containerType: input.containerType as never,
         containerQuantity: input.quantity,
         incoterm: input.incoterm,
+        consignmentId: consignment?.id ?? null,
         totalSellCents: headlineTotal,
         currency: headlineCurrency,
         validUntil,
@@ -154,7 +184,7 @@ export class QuotingService {
       await appendEvent(tx, event);
     });
 
-    return { quoteId, result };
+    return { quoteId, result, consignment };
   }
 
   /** Tenant-scoped fetch — a quote is invisible outside its tenant. */

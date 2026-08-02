@@ -211,6 +211,149 @@ export const marginRules = pgTable(
 // Quote → Booking → Shipment
 // ---------------------------------------------------------------------------
 
+
+// ---------------------------------------------------------------------------
+// Consignment — what is actually being shipped
+// ---------------------------------------------------------------------------
+
+/**
+ * How the goods are presented for carriage. This is not decoration: a carrier
+ * quotes, a terminal handles and a customs officer inspects against these
+ * words, and "40 pallets" and "40 loose pieces" are different prices and
+ * different risks.
+ */
+export const packageType = pgEnum("package_type", [
+  "PALLET",
+  "CARTON",
+  "CRATE",
+  "DRUM",
+  "BAG",
+  "BALE",
+  "ROLL",
+  "IBC",
+  "BULK",
+  "LOOSE",
+]);
+
+/**
+ * What the goods *are*, in the sense the operation cares about. Each value
+ * changes the paperwork, the equipment and the price:
+ * `HAZARDOUS` needs a UN number, IMO class and packing group before anything
+ * can be booked; `REEFER` needs a temperature range and plugged equipment;
+ * `OVERSIZED` cannot travel in a standard box at all.
+ */
+export const cargoType = pgEnum("cargo_type", [
+  "GENERAL",
+  "HAZARDOUS",
+  "REEFER",
+  "PERISHABLE",
+  "OVERSIZED",
+  "VALUABLE",
+  "LIVE_ANIMALS",
+]);
+
+/**
+ * How fast the customer needs it, which is a commercial choice rather than a
+ * physical one. It filters rate cards by transit time and carries a service
+ * uplift — a shipper who says "express" and is quoted a 34-day sailing has
+ * been sold the wrong thing.
+ */
+export const urgency = pgEnum("urgency", ["ECONOMY", "STANDARD", "EXPRESS", "CRITICAL"]);
+
+/**
+ * A consignment: the goods, where they are collected, where they leave the
+ * country, and how quickly they must move.
+ *
+ * Created with the quote and carried through to the shipment by reference
+ * rather than copied, so the cargo a customer was quoted for and the cargo
+ * that sails are provably the same rows.
+ *
+ * Weights are integer grams and volumes integer cubic centimetres, for the
+ * same reason money is integer cents: floating point in a chargeable-weight
+ * calculation is a rounding dispute with a carrier waiting to happen.
+ */
+export const consignments = pgTable(
+  "consignments",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id").notNull().references(() => tenants.id),
+
+    /** Free-text description of the goods, as it will read on the B/L. */
+    description: text("description").notNull(),
+    cargoType: cargoType("cargo_type").notNull().default("GENERAL"),
+    urgency: urgency("urgency").notNull().default("STANDARD"),
+
+    /** Where the goods are collected. Null when the shipper delivers to port. */
+    pickupLocode: text("pickup_locode"),
+    pickupAddress: text("pickup_address"),
+    pickupContact: text("pickup_contact"),
+    pickupFrom: timestamp("pickup_from", { withTimezone: true }),
+    pickupTo: timestamp("pickup_to", { withTimezone: true }),
+
+    /** UN/LOCODE the goods leave the country through, and arrive at. */
+    portOfExit: text("port_of_exit").notNull(),
+    portOfEntry: text("port_of_entry").notNull(),
+
+    /** Derived from the items and stored, so a quote stays reproducible. */
+    pieces: integer("pieces").notNull().default(0),
+    grossWeightGrams: bigint("gross_weight_grams", { mode: "number" }).notNull().default(0),
+    volumeCm3: bigint("volume_cm3", { mode: "number" }).notNull().default(0),
+    /** max(gross, volumetric) for the mode — what the carrier actually bills. */
+    chargeableWeightGrams: bigint("chargeable_weight_grams", { mode: "number" }).notNull().default(0),
+
+    /** Dangerous goods. Required together when cargo_type = HAZARDOUS. */
+    unNumber: text("un_number"),
+    imoClass: text("imo_class"),
+    packingGroup: text("packing_group"),
+
+    /** Reefer setpoint range in tenths of a degree Celsius, to avoid floats. */
+    tempMinDeciC: integer("temp_min_deci_c"),
+    tempMaxDeciC: integer("temp_max_deci_c"),
+
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("consignments_tenant_idx").on(t.tenantId),
+    index("consignments_lane_idx").on(t.portOfExit, t.portOfEntry),
+  ],
+);
+
+/** One line of the packing list. A consignment is the sum of these. */
+export const cargoItems = pgTable(
+  "cargo_items",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    consignmentId: uuid("consignment_id")
+      .notNull()
+      .references(() => consignments.id, { onDelete: "cascade" }),
+    description: text("description").notNull(),
+    packageType: packageType("package_type").notNull(),
+    pieces: integer("pieces").notNull().default(1),
+    grossWeightGrams: bigint("gross_weight_grams", { mode: "number" }).notNull(),
+    /** Per-piece dimensions in millimetres; null when not measured. */
+    lengthMm: integer("length_mm"),
+    widthMm: integer("width_mm"),
+    heightMm: integer("height_mm"),
+    /** Non-stackable freight costs the slot above it, so carriers price it up. */
+    stackable: boolean("stackable").notNull().default(true),
+    /** Shipping marks as they appear on the packages. */
+    marksAndNumbers: text("marks_and_numbers"),
+    hsCode: text("hs_code"),
+  },
+  (t) => [index("cargo_items_consignment_idx").on(t.consignmentId)],
+);
+
+export const consignmentsRelations = relations(consignments, ({ many }) => ({
+  items: many(cargoItems),
+}));
+
+export const cargoItemsRelations = relations(cargoItems, ({ one }) => ({
+  consignment: one(consignments, {
+    fields: [cargoItems.consignmentId],
+    references: [consignments.id],
+  }),
+}));
+
 export const incoterm = pgEnum("incoterm", [
   "EXW",
   "FCA",
@@ -246,6 +389,8 @@ export const quotes = pgTable(
     containerType: containerType("container_type"),
     containerQuantity: integer("container_quantity").notNull().default(1),
     incoterm: incoterm("incoterm").notNull(),
+    /** Nullable for quotes raised before consignment detail was captured. */
+    consignmentId: uuid("consignment_id").references(() => consignments.id),
     totalSellCents: bigint("total_sell_cents", { mode: "number" }).notNull(),
     currency: text("currency").notNull(),
     validUntil: timestamp("valid_until", { withTimezone: true }).notNull(),
@@ -297,6 +442,8 @@ export const shipments = pgTable(
     origin: text("origin").notNull(),
     destination: text("destination").notNull(),
     incoterm: incoterm("incoterm").notNull(),
+    /** Carried from the quote, not copied — same rows, provably. */
+    consignmentId: uuid("consignment_id").references(() => consignments.id),
     /** Temporal workflow id running this shipment's lifecycle. */
     workflowId: text("workflow_id"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

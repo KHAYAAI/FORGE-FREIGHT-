@@ -2,6 +2,8 @@ import { Controller, Get, Inject, Param, ParseUUIDPipe, Query } from "@nestjs/co
 import { and, asc, count, desc, eq, inArray, lt, or } from "drizzle-orm";
 import {
   bookings,
+  cargoItems,
+  consignments,
   events,
   invoices,
   shipments,
@@ -85,10 +87,32 @@ export class PortalController {
     };
   }
 
+  /**
+   * A shipment with the cargo detail the customer themselves declared —
+   * description, packaging, weights, collection point, port of exit and how
+   * urgent they said it was. This is their own information coming back to
+   * them, so none of it is withheld; what stays out is the forwarder's cost
+   * build-up, which lives on the charges and never on the consignment.
+   */
   @Get("shipments/:id")
   async shipment(@Param("id", ParseUUIDPipe) id: string, @CurrentAuth() auth: AuthContext) {
     const row = await this.ownedShipment(auth, id);
-    return row ?? null;
+    if (!row) return null;
+    if (!row.consignmentId) return { ...row, consignment: null };
+
+    const [consignment] = await this.db
+      .select()
+      .from(consignments)
+      .where(eq(consignments.id, row.consignmentId));
+    if (!consignment) return { ...row, consignment: null };
+
+    const items = await this.db
+      .select()
+      .from(cargoItems)
+      .where(eq(cargoItems.consignmentId, consignment.id))
+      .orderBy(asc(cargoItems.description));
+
+    return { ...row, consignment: { ...consignment, items } };
   }
 
   /**

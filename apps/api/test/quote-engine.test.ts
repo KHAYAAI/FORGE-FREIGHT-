@@ -3,6 +3,7 @@ import {
   buildQuote,
   NoMarginRuleError,
   NoRateError,
+  NoServiceLevelError,
   resolveMarginRule,
   selectRateCard,
   type MarginRuleInput,
@@ -209,5 +210,86 @@ describe("buildQuote", () => {
       expect(Number.isInteger(line.buyCents)).toBe(true);
       expect(Number.isInteger(line.sellCents)).toBe(true);
     }
+  });
+});
+
+describe("cargo type and urgency", () => {
+  const req2 = { ...request, cargoType: "GENERAL" as const, urgency: "STANDARD" as const };
+
+  it("prices general standard cargo exactly as before", () => {
+    const base = buildQuote(request, [shaDur], [defaultRule]);
+    const same = buildQuote(req2, [shaDur], [defaultRule]);
+    expect(same.lines.map((l) => l.chargeCode)).toEqual(base.lines.map((l) => l.chargeCode));
+  });
+
+  it("adds a handling line for hazardous cargo, and says so", () => {
+    const q = buildQuote({ ...req2, cargoType: "HAZARDOUS" }, [shaDur], [defaultRule]);
+    const hnd = q.lines.find((l) => l.chargeCode === "HND");
+    expect(hnd).toBeDefined();
+    expect(hnd!.description).toMatch(/hazardous/);
+    // 35% of the freight buy, per the operator's default tariff.
+    expect(hnd!.buyCents).toBe(Math.round(shaDur.buyAmountCents * 0.35));
+  });
+
+  it("keeps the uplift off the freight rate itself", () => {
+    // An operator renegotiating with the carrier needs the base untouched, and
+    // a customer asking why DG costs more deserves a line that says so.
+    const q = buildQuote({ ...req2, cargoType: "REEFER" }, [shaDur], [defaultRule]);
+    expect(q.lines.find((l) => l.chargeCode === "FRT")!.buyCents).toBe(shaDur.buyAmountCents);
+  });
+
+  /** Same lane, but a sailing fast enough to qualify for express. */
+  const fastSailing: RateCardInput = { ...shaDur, id: "rc-fast", transitDays: 18, buyAmountCents: 2800_00 };
+
+  it("charges for express service", () => {
+    const q = buildQuote({ ...req2, urgency: "EXPRESS" }, [shaDur, fastSailing], [defaultRule]);
+    expect(q.rateCardId).toBe("rc-fast");
+    const svc = q.lines.find((l) => l.chargeCode === "SVC");
+    expect(svc).toBeDefined();
+    expect(svc!.buyCents).toBe(Math.round(fastSailing.buyAmountCents * 0.18));
+  });
+
+  it("pays more for a faster carrier when the service level demands it", () => {
+    // The cheapest card wins on STANDARD and loses on EXPRESS — which is the
+    // whole point of asking the customer how urgent it is.
+    expect(buildQuote(req2, [shaDur, fastSailing], [defaultRule]).rateCardId).toBe(shaDur.id);
+    expect(
+      buildQuote({ ...req2, urgency: "EXPRESS" }, [shaDur, fastSailing], [defaultRule]).rateCardId,
+    ).toBe("rc-fast");
+  });
+
+  it("will not sell a slow sailing as express", () => {
+    // shaDur is 28 days; EXPRESS caps at 21. Refusing is the point — quoting
+    // it anyway sells the customer something they did not ask for.
+    expect(() => buildQuote({ ...req2, urgency: "EXPRESS" }, [shaDur], [defaultRule])).toThrow(
+      NoServiceLevelError,
+    );
+  });
+
+  it("names the fastest transit it could actually offer", () => {
+    try {
+      buildQuote({ ...req2, urgency: "CRITICAL" }, [shaDur], [defaultRule]);
+      throw new Error("expected a refusal");
+    } catch (err) {
+      expect((err as Error).message).toMatch(/fastest available transit is 28 days/);
+    }
+  });
+
+  it("distinguishes an unserved lane from an unserved service level", () => {
+    const offLane = { ...req2, origin: "AEJEA", urgency: "EXPRESS" as const };
+    expect(() => buildQuote(offLane, [shaDur], [defaultRule])).toThrow(NoRateError);
+  });
+
+  it("does not drop a carrier for having no stated transit", () => {
+    // An unknown transit is unknown, not slow. Excluding it would lose a
+    // carrier to a data gap rather than a service one.
+    const unknown = { ...shaDur, id: "rc-unknown", transitDays: null, buyAmountCents: 999_00 };
+    const q = buildQuote({ ...req2, urgency: "CRITICAL" }, [shaDur, unknown], [defaultRule]);
+    expect(q.rateCardId).toBe("rc-unknown");
+  });
+
+  it("records the chargeable weight it priced against", () => {
+    const q = buildQuote({ ...req2, chargeableWeightGrams: 1_800_000 }, [shaDur], [defaultRule]);
+    expect(q.chargeableWeightGrams).toBe(1_800_000);
   });
 });

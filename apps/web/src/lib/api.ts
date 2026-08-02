@@ -7,6 +7,8 @@ import type {
   FreightDocument,
   Invoice,
   NetworkOverview,
+  Consignment,
+  ConsignmentReference,
   MarginRule,
   Page,
   PortalTimelineEvent,
@@ -121,6 +123,8 @@ export const api = {
   // Rates administration — the buy side. Read here, written from the client
   // through /api/proxy so the page can refresh in place.
   rateCards: () => apiGet<RateCard[]>("/rates/cards"),
+  consignments: () => apiGet<Consignment[]>("/consignments"),
+  consignmentReference: () => apiGet<ConsignmentReference>("/consignments/reference"),
   marginRules: () => apiGet<MarginRule[]>("/rates/margin-rules"),
 
   // Portal — the customer-facing views. Separate endpoints, not the operator

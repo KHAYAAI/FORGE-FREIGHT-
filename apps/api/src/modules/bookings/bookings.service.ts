@@ -23,6 +23,7 @@ import {
   type EventActor,
 } from "@forge-freight/events";
 import { ScreeningService } from "../compliance/screening.service.js";
+import { ConsignmentsService } from "../consignments/consignments.service.js";
 import { DB } from "../db/db.module.js";
 import { appendEvent } from "../db/event-store.js";
 import { TemporalService } from "../temporal/temporal.service.js";
@@ -40,6 +41,7 @@ export class BookingsService {
     @Inject(DB) private readonly db: Db,
     @Inject(TemporalService) private readonly temporal: TemporalService,
     @Inject(ScreeningService) private readonly screening: ScreeningService,
+    @Inject(ConsignmentsService) private readonly consignments: ConsignmentsService,
   ) {}
 
   /**
@@ -125,6 +127,9 @@ export class BookingsService {
           status: "BOOKED",
           origin: quote.origin,
           destination: quote.destination,
+          // Carried by reference, not copied: the cargo the customer was
+          // quoted for and the cargo that sails are provably the same rows.
+          consignmentId: quote.consignmentId,
           incoterm: quote.incoterm,
         })
         .returning({ reference: shipments.reference });
@@ -219,10 +224,20 @@ export class BookingsService {
       .from(shipments)
       .where(and(eq(shipments.id, shipmentId), eq(shipments.tenantId, tenantId)));
     if (!shipment) throw new NotFoundException(`Shipment ${shipmentId} not found`);
-    const [shipmentLegs, shipmentContainers] = await Promise.all([
+    const [shipmentLegs, shipmentContainers, consignment] = await Promise.all([
       this.db.select().from(legs).where(eq(legs.shipmentId, shipmentId)),
       this.db.select().from(containers).where(eq(containers.shipmentId, shipmentId)),
+      // Null on shipments booked before consignment capture existed, which is
+      // why every consumer treats it as optional rather than assuming it.
+      shipment.consignmentId
+        ? this.consignments.get(tenantId, shipment.consignmentId).catch(() => null)
+        : Promise.resolve(null),
     ]);
-    return { ...shipment, legs: shipmentLegs, containers: shipmentContainers };
+    return {
+      ...shipment,
+      legs: shipmentLegs,
+      containers: shipmentContainers,
+      consignment,
+    };
   }
 }

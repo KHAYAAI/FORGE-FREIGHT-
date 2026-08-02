@@ -9,12 +9,14 @@ import type {
   Partner,
   Party,
   Quote,
+  Consignment,
+  ConsignmentReference,
   MarginRule,
+  Measurement,
   Payment,
   PaymentResult,
   RateCard,
   RateSurcharge,
-  Shipment,
 } from "./types";
 
 /** Client-side counterpart to lib/api.ts — goes through /api/proxy (same-origin, no CORS). */
@@ -76,9 +78,14 @@ export const clientApi = {
     containerType: string | null;
     quantity: number;
     incoterm: string;
+    consignment?: ConsignmentDraft;
   }) => post<Quote & { quoteId: string; result: { carrierName: string; transitDays: number | null; lines: { chargeCode: string; description: string; quantity: number; sellCents: number; currency: string }[]; totalsByCurrency: Record<string, number> } }>("/quotes", body),
+  /** The API answers with ids, not a shipment row — see `BookQuoteResult`. */
   bookQuote: (id: string, carrierBookingRef?: string) =>
-    post<Shipment & { reference: string }>(`/quotes/${id}/book`, carrierBookingRef ? { carrierBookingRef } : {}),
+    post<{ bookingId: string; shipmentId: string; reference: string }>(
+      `/quotes/${id}/book`,
+      carrierBookingRef ? { carrierBookingRef } : {},
+    ),
   listParties: () => get<Party[]>("/parties"),
   createParty: (body: {
     name: string;
@@ -122,6 +129,12 @@ export const clientApi = {
   updatePartnerFeeRate: (id: string, platformFeeBps: number) =>
     patch<Partner>(`/tenants/partners/${id}/fee-rate`, { platformFeeBps }),
 
+  consignmentReference: () => get<ConsignmentReference>("/consignments/reference"),
+  /** Price a packing list without saving it — drives the live totals in the form. */
+  measureConsignment: (body: ConsignmentDraft & { mode: string }) =>
+    post<Measurement>("/consignments/measure", body),
+  listConsignments: () => get<Consignment[]>("/consignments"),
+
   listRateCards: () => get<RateCard[]>("/rates/cards"),
   createRateCard: (body: RateCardDraft) => post<RateCard>("/rates/cards", body),
   updateRateCard: (id: string, body: Partial<RateCardDraft>) =>
@@ -136,6 +149,39 @@ export const clientApi = {
     patch<MarginRule>(`/rates/margin-rules/${id}`, body),
   deleteMarginRule: (id: string) => del(`/rates/margin-rules/${id}`),
 };
+
+export interface CargoItemDraft {
+  description: string;
+  packageType: string;
+  pieces: number;
+  /** Gross weight of the line, in grams. The form collects kilograms. */
+  grossWeightGrams: number;
+  lengthMm?: number | null;
+  widthMm?: number | null;
+  heightMm?: number | null;
+  stackable: boolean;
+  marksAndNumbers?: string | null;
+  hsCode?: string | null;
+}
+
+export interface ConsignmentDraft {
+  description: string;
+  cargoType: string;
+  urgency: string;
+  pickupLocode?: string | null;
+  pickupAddress?: string | null;
+  pickupContact?: string | null;
+  pickupFrom?: string | null;
+  pickupTo?: string | null;
+  portOfExit: string;
+  portOfEntry: string;
+  unNumber?: string | null;
+  imoClass?: string | null;
+  packingGroup?: string | null;
+  tempMinDeciC?: number | null;
+  tempMaxDeciC?: number | null;
+  items: CargoItemDraft[];
+}
 
 export interface SurchargeDraft {
   code: string;

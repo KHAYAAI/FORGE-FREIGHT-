@@ -1,10 +1,11 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { clientApi } from "@/lib/client-api";
 import { money } from "@/lib/format";
-import type { Party } from "@/lib/types";
+import type { ConsignmentReference, Party } from "@/lib/types";
+import { ConsignmentFields, emptyConsignment } from "./consignment-fields";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Select } from "@/components/ui/field";
 import { Panel, PanelHeader } from "@/components/ui/card";
@@ -45,6 +46,15 @@ export function QuoteForm({ parties }: { parties: Party[] }) {
     quantity: 2,
     incoterm: "FOB",
   });
+  // The cargo detail travels with the quote request: chargeable weight,
+  // handling uplift and the transit ceiling all come from it, so a quote
+  // raised without it is priced on assumptions.
+  const [consignment, setConsignment] = useState(() => emptyConsignment("CNSHA", "ZADUR"));
+  const [reference, setReference] = useState<ConsignmentReference | null>(null);
+  useEffect(() => {
+    clientApi.consignmentReference().then(setReference).catch(() => setReference(null));
+  }, []);
+
   const [quote, setQuote] = useState<QuoteResponse | null>(null);
   const [booking, setBooking] = useState<{ reference: string; id: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -56,7 +66,7 @@ export function QuoteForm({ parties }: { parties: Party[] }) {
     setBooking(null);
     setQuote(null);
     try {
-      const result = await clientApi.createQuote(form);
+      const result = await clientApi.createQuote({ ...form, consignment });
       setQuote(result);
       toast.success("Quote generated", `${result.result.carrierName} — ${result.result.lines.length} line item(s).`);
     } catch (e) {
@@ -74,7 +84,9 @@ export function QuoteForm({ parties }: { parties: Party[] }) {
     setError(null);
     try {
       const result = await clientApi.bookQuote(quote.quoteId);
-      setBooking({ reference: result.reference, id: result.id });
+      // The API returns `shipmentId`; reading `id` here sent the operator to
+      // /shipments/undefined the moment they clicked through.
+      setBooking({ reference: result.reference, id: result.shipmentId });
       toast.success("Shipment booked", `Reference ${result.reference}`);
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
@@ -86,9 +98,10 @@ export function QuoteForm({ parties }: { parties: Party[] }) {
   }
 
   return (
-    <div className="grid grid-cols-1 gap-4 lg:grid-cols-5">
+    <div className="flex flex-col gap-4">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-5">
       <Panel className="lg:col-span-2">
-        <PanelHeader title="Quote parameters" />
+        <PanelHeader title="Lane &amp; commercial terms" eyebrow="Where it goes, and on whose account" />
         <div className="flex flex-col gap-4">
           <Field label="Customer" required>
             <Select
@@ -110,7 +123,11 @@ export function QuoteForm({ parties }: { parties: Party[] }) {
             <Field label="Origin" required hint="UN/LOCODE">
               <Input
                 value={form.origin}
-                onChange={(e) => setForm({ ...form, origin: e.target.value.toUpperCase() })}
+                onChange={(e) => {
+                  const origin = e.target.value.toUpperCase();
+                  setForm({ ...form, origin });
+                  setConsignment((c) => ({ ...c, portOfExit: origin }));
+                }}
                 className="font-mono"
                 maxLength={5}
               />
@@ -118,7 +135,11 @@ export function QuoteForm({ parties }: { parties: Party[] }) {
             <Field label="Destination" required hint="UN/LOCODE">
               <Input
                 value={form.destination}
-                onChange={(e) => setForm({ ...form, destination: e.target.value.toUpperCase() })}
+                onChange={(e) => {
+                  const destination = e.target.value.toUpperCase();
+                  setForm({ ...form, destination });
+                  setConsignment((c) => ({ ...c, portOfEntry: destination }));
+                }}
                 className="font-mono"
                 maxLength={5}
               />
@@ -184,6 +205,20 @@ export function QuoteForm({ parties }: { parties: Party[] }) {
       </Panel>
 
       <Panel className="lg:col-span-3">
+        <PanelHeader
+          title="Cargo details"
+          eyebrow="What is in the box, and how urgently it moves"
+        />
+        <ConsignmentFields
+          value={consignment}
+          onChange={setConsignment}
+          mode={form.mode}
+          reference={reference}
+        />
+      </Panel>
+      </div>
+
+      <Panel>
         <PanelHeader
           title="Itemised quote"
           eyebrow={quote ? quote.result.carrierName : undefined}

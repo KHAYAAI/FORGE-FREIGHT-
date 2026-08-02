@@ -5,6 +5,7 @@ import { z } from "zod";
 import { CurrentAuth } from "../auth/current-auth.decorator.js";
 import type { AuthContext } from "../auth/auth.types.js";
 import { QuotePdfService } from "./quote-pdf.service.js";
+import { CreateConsignmentDto } from "../consignments/consignments.dto.js";
 import { QuotingService } from "./quoting.service.js";
 
 const QuoteRequestDto = z.object({
@@ -21,6 +22,17 @@ const QuoteRequestDto = z.object({
     "EXW", "FCA", "FAS", "FOB", "CFR", "CIF", "CPT", "CIP", "DAP", "DPU", "DDP",
   ]),
   validityDays: z.number().int().positive().max(90).optional(),
+  /**
+   * The packing list, inline. Optional so existing integrations keep working,
+   * but without it the price is a guess: chargeable weight, handling uplift
+   * and the service-level transit ceiling all come from here.
+   */
+  consignment: CreateConsignmentDto.optional(),
+  /** Or reference one already captured. */
+  consignmentId: z.string().uuid().optional(),
+}).refine((v) => !(v.consignment && v.consignmentId), {
+  message: "Send either a consignment or a consignmentId, not both",
+  path: ["consignmentId"],
 });
 
 @Controller("quotes")

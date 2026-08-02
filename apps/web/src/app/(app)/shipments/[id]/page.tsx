@@ -6,6 +6,7 @@ import { Panel, PanelHeader } from "@/components/ui/card";
 import { ShipmentStatusTag } from "@/components/ui/badge";
 import { ErrorState } from "@/components/ui/empty-state";
 import { Mono } from "@/components/ui/table";
+import { ConsignmentPanel } from "@/components/ui/consignment-panel";
 
 const EVENT_LABELS: Record<string, string> = {
   "shipment.booked": "Booking confirmed",
@@ -71,6 +72,12 @@ export default async function ShipmentDetailPage({
       />
 
       {error && <ErrorState message={error} />}
+
+      {shipment?.consignment && (
+        <div className="mb-4">
+          <ConsignmentPanel consignment={shipment.consignment} commercial />
+        </div>
+      )}
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-5">
         <Panel className="xl:col-span-3">

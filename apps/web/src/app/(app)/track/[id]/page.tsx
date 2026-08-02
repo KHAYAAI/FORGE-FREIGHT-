@@ -4,6 +4,7 @@ import { PageHeader } from "@/components/ui/page-header";
 import { Panel, PanelHeader } from "@/components/ui/card";
 import { ShipmentStatusTag } from "@/components/ui/badge";
 import { EmptyState, ErrorState } from "@/components/ui/empty-state";
+import { ConsignmentPanel } from "@/components/ui/consignment-panel";
 
 /**
  * Milestone wording for a shipper rather than an operator: "your container was
@@ -74,6 +75,15 @@ export default async function TrackDetailPage({ params }: { params: Promise<{ id
         <ShipmentStatusTag status={shipment.status} />
         <span className="text-[12px] text-secondary">Booked {fmtDate(shipment.createdAt)}</span>
       </div>
+
+      {shipment.consignment && (
+        <div className="mb-4">
+          {/* The customer's own declaration coming back to them. Handling
+              requirements are the forwarder's obligations to carriers and
+              terminals, so `commercial` stays off. */}
+          <ConsignmentPanel consignment={shipment.consignment} />
+        </div>
+      )}
 
       <Panel>
         <PanelHeader title="Journey" eyebrow="What has happened so far" />

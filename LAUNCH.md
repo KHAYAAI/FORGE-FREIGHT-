@@ -187,7 +187,7 @@ quoting was the one path that didn't. Covered by
 Unit and integration suites are split by config (`vitest.config.ts` vs
 `vitest.integration.config.ts`), so `pnpm test` still runs with no services
 started and `pnpm test:integration` needs `DATABASE_URL`. Totals as of the
-latest pass: **224 unit tests (114 API + 98 web + 12 packages) + 56 integration
+latest pass: **254 unit tests (144 API + 98 web + 12 packages) + 74 integration
 tests**, lint/typecheck/build clean.
 
 ## Console authentication (this round)
@@ -458,6 +458,84 @@ needs and the roles it has) and refused a payment; a `finance` user gets
 through to a genuine 404; an `admin` writes the card; reads stay open to `ops`;
 and the monitor returns `infra` + 4 consumers + a tenant-scoped backlog of 24
 to the operator, against `null` + 0 consumers + 6 to a partner agent.
+
+## Consignment capture — what is actually in the box (this round)
+
+The platform could price a lane but not describe the freight on it. A quote
+knew the corridor, the container type and a count; it did not know what the
+goods were, what they were packed in, what they weighed, where they were
+collected, or how urgently they had to move. Every one of those changes the
+price or the paperwork, so the platform was pricing on assumptions.
+
+**Domain** — `consignments` + `cargo_items`, created with the quote and carried
+to the shipment **by reference rather than copied**, so the cargo a customer was
+quoted for and the cargo that sails are provably the same rows. Weights are
+integer grams and volumes integer cubic centimetres, for the same reason money
+is integer cents.
+
+- **Type of package** — pallet, carton, crate, drum, bag, bale, roll, IBC,
+  bulk, loose. A terminal handles and a customs officer inspects against these
+  words, and "40 pallets" and "40 loose pieces" are different prices.
+- **Description**, per line and for the consignment as it will read on the B/L.
+- **Pick-up point** — LOCODE, address, site contact and a collection window,
+  held **separately from the port of exit**. Conflating them sends a truck to
+  the wrong address.
+- **Weight and dimensions** — and the asymmetry the industry actually uses,
+  stated in the code rather than left to be inferred: a packing list reads
+  "10 CTNS, 40 × 60 × 40 cm, 250 KGS", so **dimensions are per piece and weight
+  is the line total**. Reading either the other way is a ten-fold error.
+- **Port of exit** and port of entry, normalised on the way in — a lane filed
+  as `zadur` would silently match no rate at all.
+- **Urgency** — economy, standard, express, critical.
+- **Type of cargo** — general, hazardous, reefer, perishable, oversized,
+  valuable, live animals.
+
+**These are not form fields; they are inputs to arithmetic:**
+
+1. **Chargeable weight** (`packing.ts`). Freight is sold on the greater of what
+   the goods weigh and what their space is deemed to weigh — IATA's 6000 cm³/kg
+   for air, the freight tonne for ocean LCL. A pallet of pillows and a pallet of
+   steel take the same slot, and a quote priced on gross weight loses money on
+   every low-density shipment. In the live run below, 2,640 kg of cartons
+   billed as **21,120 kg**.
+2. **Handling uplift** by cargo type, carried as its own `HND` line rather than
+   folded into the freight rate — a customer asking why dangerous goods cost
+   more deserves a line that says so, and an operator renegotiating a carrier
+   rate needs the base untouched.
+3. **Service level as a filter, not just a fee.** `EXPRESS` caps transit at 21
+   days and `CRITICAL` at 10; a lane that cannot meet it raises
+   `NoServiceLevelError`, deliberately distinct from `NoRateError` — "we don't
+   serve that corridor" and "we serve it in 34 days and you asked for 10" are
+   different conversations, and answering the second with the first loses the
+   sale for the wrong reason. A carrier with no stated transit is *not* dropped:
+   unknown is unknown, not slow.
+4. **Compliance refused at the cheapest moment.** Hazardous cargo without a
+   complete UN number, IMO class and packing group cannot be quoted, let alone
+   booked — an incomplete declaration is the most common reason a container is
+   turned away at a terminal gate. Reefer without a temperature range is refused
+   the same way. Both are caught at quote time rather than at the port.
+
+**Console** — the quote screen gained a *Cargo details* panel that measures the
+packing list as it is typed (`POST /consignments/measure`, saving nothing) and
+shows the chargeable weight moving in real time, with a sentence explaining
+which basis won and why. Cargo type switches reveal the declaration or the
+temperature block inline, and requirements render live as `Required` or `Note`.
+Everything is entered in kilograms and centimetres and converted at the edge.
+The consignment then appears on the operator's shipment screen and, in the
+customer's own words, in the shipper portal — it is their declaration coming
+back to them, so nothing is withheld there except the forwarder's carrier and
+terminal obligations.
+
+**Bug found by clicking through it**: "View shipment →" after booking went to
+`/shipments/undefined`. The API answers with `shipmentId`; the form read `id`.
+Pre-existing, and invisible to every test because no test clicked the link.
+
+**Verified live**: measured a real packing list (220 cartons, 2,640 kg, 21.12 m³
+→ 21,120 kg chargeable), quoted against it, watched a hazardous declaration
+block and then clear, confirmed `EXPRESS` refused on a 28-day sailing with the
+fastest available transit named in the message, booked it, and found the cargo
+on the shipment screen. 18 new integration tests and 20 new unit tests over the
+arithmetic itself.
 
 ## Must do before going live (operator action, not code)
 

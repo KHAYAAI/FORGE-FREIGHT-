@@ -1,3 +1,10 @@
+import {
+  CARGO_TYPE_UPLIFT_BPS,
+  URGENCY_PROFILE,
+  type CargoType,
+  type Urgency,
+} from "../consignments/packing.js";
+
 /**
  * The quote engine — pure domain logic, no framework or database imports.
  * The Nest module wires a Drizzle-backed RateSource in; tests use an
@@ -49,6 +56,15 @@ export interface QuoteRequest {
   containerType: string | null;
   quantity: number;
   requestedAt: Date;
+  /**
+   * What is in the box and how fast it must move. Optional so quotes raised
+   * before consignment capture keep working; when present, both change the
+   * price and the second also narrows which carriers are eligible at all.
+   */
+  cargoType?: CargoType;
+  urgency?: Urgency;
+  /** Rolled up from the packing list — the basis a per-kg tariff applies to. */
+  chargeableWeightGrams?: number;
 }
 
 export interface QuoteLine {
@@ -68,6 +84,8 @@ export interface QuoteResult {
   /** Sell totals per currency — quotes on SA lanes are legitimately multicurrency. */
   totalsByCurrency: Record<string, number>;
   marginRuleId: string;
+  /** Echoed back so a quote records the basis it was priced on. */
+  chargeableWeightGrams: number | null;
 }
 
 export class NoRateError extends Error {
@@ -76,6 +94,24 @@ export class NoRateError extends Error {
       `No valid rate for ${req.origin}→${req.destination} ${req.mode} ${req.containerType ?? ""} at ${req.requestedAt.toISOString()}`,
     );
     this.name = "NoRateError";
+  }
+}
+
+/**
+ * The lane is priced, but nothing on it is fast enough for the service level
+ * asked for. Deliberately its own error: "we do not serve that corridor" and
+ * "we serve it in 34 days and you asked for 10" are different conversations
+ * with the customer, and answering the second with the first loses the sale
+ * for the wrong reason.
+ */
+export class NoServiceLevelError extends Error {
+  constructor(req: QuoteRequest, best: number | null) {
+    const cap = URGENCY_PROFILE[req.urgency ?? "STANDARD"].maxTransitDays;
+    super(
+      `No ${req.urgency} service on ${req.origin}→${req.destination}: ` +
+        `the fastest available transit is ${best ?? "unknown"} days against a ${cap}-day requirement`,
+    );
+    this.name = "NoServiceLevelError";
   }
 }
 
@@ -137,12 +173,12 @@ function applyMargin(
   return withFloor ? Math.max(withMargin, buyCents + rule.minMarginCents) : withMargin;
 }
 
-/** Pick the cheapest valid rate card for the lane (deterministic tiebreak by id). */
-export function selectRateCard(
+/** Rate cards that serve the lane at this instant, cheapest first. */
+export function eligibleRateCards(
   cards: RateCardInput[],
   req: QuoteRequest,
-): RateCardInput | null {
-  const valid = cards
+): RateCardInput[] {
+  return cards
     .filter(
       (c) =>
         c.origin === req.origin &&
@@ -155,7 +191,25 @@ export function selectRateCard(
     .sort(
       (a, b) => a.buyAmountCents - b.buyAmountCents || a.id.localeCompare(b.id),
     );
-  return valid[0] ?? null;
+}
+
+/**
+ * Pick the cheapest valid rate card for the lane (deterministic tiebreak by
+ * id), subject to the service level asked for.
+ *
+ * A rate card with no stated transit is not excluded by an urgent request —
+ * an unknown transit is unknown, not slow, and refusing to quote it would
+ * silently drop carriers for a data gap rather than a service one.
+ */
+export function selectRateCard(
+  cards: RateCardInput[],
+  req: QuoteRequest,
+): RateCardInput | null {
+  const valid = eligibleRateCards(cards, req);
+  const cap = URGENCY_PROFILE[req.urgency ?? "STANDARD"].maxTransitDays;
+  if (cap === null) return valid[0] ?? null;
+  const inTime = valid.filter((c) => c.transitDays === null || c.transitDays <= cap);
+  return inTime[0] ?? null;
 }
 
 export function buildQuote(
@@ -167,7 +221,19 @@ export function buildQuote(
     throw new RangeError(`quantity must be a positive integer, got ${req.quantity}`);
   }
   const card = selectRateCard(cards, req);
-  if (!card) throw new NoRateError(req);
+  if (!card) {
+    // Distinguish "no rate on this lane" from "no rate fast enough". The
+    // second is a service conversation, not a coverage one.
+    const anyOnLane = eligibleRateCards(cards, req);
+    if (anyOnLane.length > 0) {
+      const fastest = anyOnLane
+        .map((c) => c.transitDays)
+        .filter((d): d is number => d !== null)
+        .sort((a, b) => a - b)[0];
+      throw new NoServiceLevelError(req, fastest ?? null);
+    }
+    throw new NoRateError(req);
+  }
   const rule = resolveMarginRule(rules, req);
 
   const lines: QuoteLine[] = [];
@@ -181,6 +247,36 @@ export function buildQuote(
     sellCents: applyMargin(freightBuy, rule, true),
     currency: card.currency,
   });
+
+  // Handling and service uplifts are computed off the freight buy and carried
+  // as their own lines rather than folded into the freight rate. A customer
+  // who asks why hazardous cargo costs more deserves a line that says so, and
+  // an operator renegotiating a carrier rate needs the base untouched.
+  const cargoUplift = CARGO_TYPE_UPLIFT_BPS[req.cargoType ?? "GENERAL"];
+  if (cargoUplift > 0) {
+    const buy = Math.round((freightBuy * cargoUplift) / 10_000);
+    lines.push({
+      chargeCode: "HND",
+      description: `${(req.cargoType ?? "GENERAL").replace(/_/g, " ").toLowerCase()} cargo handling`,
+      quantity: req.quantity,
+      buyCents: buy,
+      sellCents: applyMargin(buy, rule, false),
+      currency: card.currency,
+    });
+  }
+
+  const serviceUplift = URGENCY_PROFILE[req.urgency ?? "STANDARD"].upliftBps;
+  if (serviceUplift > 0) {
+    const buy = Math.round((freightBuy * serviceUplift) / 10_000);
+    lines.push({
+      chargeCode: "SVC",
+      description: `${(req.urgency ?? "STANDARD").toLowerCase()} service level`,
+      quantity: req.quantity,
+      buyCents: buy,
+      sellCents: applyMargin(buy, rule, false),
+      currency: card.currency,
+    });
+  }
 
   for (const s of card.surcharges) {
     const perUnitBuy =
@@ -211,5 +307,6 @@ export function buildQuote(
     lines,
     totalsByCurrency,
     marginRuleId: rule.id,
+    chargeableWeightGrams: req.chargeableWeightGrams ?? null,
   };
 }

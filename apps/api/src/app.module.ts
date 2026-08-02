@@ -14,6 +14,7 @@ import { IngestModule } from "./modules/ingest/ingest.module.js";
 import { OutboxModule } from "./modules/outbox/outbox.module.js";
 import { ProjectorModule } from "./modules/projector/projector.module.js";
 import { QuotingModule } from "./modules/quoting/quoting.module.js";
+import { ConsignmentsModule } from "./modules/consignments/consignments.module.js";
 import { RatesModule } from "./modules/rates/rates.module.js";
 import { ShipmentsModule } from "./modules/shipments/shipments.module.js";
 import { PortalModule } from "./modules/portal/portal.module.js";
@@ -35,6 +36,7 @@ import { TenantsModule } from "./modules/tenants/tenants.module.js";
     ProjectorModule,
     HealthModule,
     RatesModule,
+    ConsignmentsModule,
     QuotingModule,
     BookingsModule,
     ShipmentsModule,

@@ -10,6 +10,8 @@ export type ShipmentStatus =
   | "CANCELLED";
 
 export interface Shipment {
+  /** Present once cargo detail was captured; null on older shipments. */
+  consignment?: Consignment | null;
   id: string;
   tenantId: string;
   reference: string;
@@ -381,4 +383,90 @@ export interface MarginRule {
   marginBps: number;
   minMarginCents: number;
   createdAt: string;
+}
+
+// --- Consignment: what is actually being shipped ---------------------------
+
+export type PackageType =
+  | "PALLET" | "CARTON" | "CRATE" | "DRUM" | "BAG"
+  | "BALE" | "ROLL" | "IBC" | "BULK" | "LOOSE";
+
+export type CargoTypeCode =
+  | "GENERAL" | "HAZARDOUS" | "REEFER" | "PERISHABLE"
+  | "OVERSIZED" | "VALUABLE" | "LIVE_ANIMALS";
+
+export type UrgencyCode = "ECONOMY" | "STANDARD" | "EXPRESS" | "CRITICAL";
+
+export interface CargoItem {
+  id: string;
+  consignmentId: string;
+  description: string;
+  packageType: PackageType;
+  pieces: number;
+  /** Gross weight of the line, not of one piece. */
+  grossWeightGrams: number;
+  /** Dimensions of a single piece. */
+  lengthMm: number | null;
+  widthMm: number | null;
+  heightMm: number | null;
+  stackable: boolean;
+  marksAndNumbers: string | null;
+  hsCode: string | null;
+}
+
+export interface HandlingRequirement {
+  code: string;
+  description: string;
+  /** Blocking requirements stop a booking; advisory ones are shown and logged. */
+  blocking: boolean;
+}
+
+export interface Consignment {
+  id: string;
+  tenantId: string;
+  description: string;
+  cargoType: CargoTypeCode;
+  urgency: UrgencyCode;
+  pickupLocode: string | null;
+  pickupAddress: string | null;
+  pickupContact: string | null;
+  pickupFrom: string | null;
+  pickupTo: string | null;
+  portOfExit: string;
+  portOfEntry: string;
+  pieces: number;
+  grossWeightGrams: number;
+  volumeCm3: number;
+  /** max(gross, volumetric) — what the carrier actually bills. */
+  chargeableWeightGrams: number;
+  unNumber: string | null;
+  imoClass: string | null;
+  packingGroup: string | null;
+  tempMinDeciC: number | null;
+  tempMaxDeciC: number | null;
+  createdAt: string;
+  items: CargoItem[];
+  requirements: HandlingRequirement[];
+  volumetricWeightGrams: number;
+  volumetricApplies: boolean;
+}
+
+/** `POST /consignments/measure` — priced before anything is saved. */
+export interface Measurement {
+  mode: TransportMode;
+  divisorCm3PerKg: number;
+  pieces: number;
+  grossWeightGrams: number;
+  volumeCm3: number;
+  volumetricWeightGrams: number;
+  chargeableWeightGrams: number;
+  volumetricApplies: boolean;
+  requirements: HandlingRequirement[];
+}
+
+export interface ConsignmentReference {
+  packageTypes: { code: PackageType; label: string }[];
+  cargoTypes: { code: CargoTypeCode; label: string; upliftBps: number }[];
+  urgencies: { code: UrgencyCode; upliftBps: number; maxTransitDays: number | null; label: string }[];
+  volumetricDivisors: Record<TransportMode, number>;
 }
