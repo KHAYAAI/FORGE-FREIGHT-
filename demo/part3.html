@@ -1,0 +1,1636 @@
+<script>
+/* ===== ASSETS_PLACEHOLDER ===== */
+
+/* ------------------------------------------------------------------ util */
+const $ = (s, r = document) => r.querySelector(s);
+const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+const el = (t, c, h) => { const n = document.createElement(t); if (c) n.className = c; if (h != null) n.innerHTML = h; return n; };
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+/* Money the way the product formats it: grouped by comma, two decimals, and
+   identical everywhere — `toLocaleString` picks separators from the runtime's
+   ICU build, which is how one screen ended up showing `ZAR 8 700,00` in a
+   server-rendered tile and `ZAR 4,500.00` in the rows beside it. */
+function money(cents, ccy) {
+  const n = Number(cents || 0) / 100;
+  const sign = n < 0 ? "-" : "";
+  const [w, f] = Math.abs(n).toFixed(2).split(".");
+  return `${ccy} ${sign}${w.replace(/\B(?=(\d{3})+(?!\d))/g, ",")}.${f}`;
+}
+const pct = (bps) => (bps / 100).toFixed(2) + "%";
+const roundHalfUp = (v) => Math.floor(v + 0.5);
+
+/* ------------------------------------------------- domain constants (real) */
+const VAT_RATE_BPS = 1500;    // duty-calculator.ts
+const ATV_UPLIFT_BPS = 1000;  // 10% upliftment on non-SACU imports
+const FX = { USD: 18.62, ZAR: 1 };  // indicative, for cross-currency totals only
+
+/* Rate cards, from the seeded book. Surcharge amounts are minor units except
+   PERCENT_OF_FREIGHT, where the column carries basis points. */
+const RATE_CARDS = [
+  { id: "rc-1", lane: "CNSHA→ZADUR", origin: "CNSHA", destination: "ZADUR", mode: "OCEAN",
+    carrier: "Maersk Line", kind: "CONTRACT", eq: "40HC", buy: 235000, ccy: "USD", transit: 28,
+    validTo: "2026-09-30",
+    surcharges: [
+      { code: "BAF", desc: "Bunker adjustment", basis: "PERCENT_OF_FREIGHT", amt: 1150, ccy: "USD" },
+      { code: "THC", desc: "Terminal handling", basis: "PER_CONTAINER", amt: 21000, ccy: "USD" },
+      { code: "ISPS", desc: "Security", basis: "PER_BL", amt: 4500, ccy: "USD" },
+    ] },
+  { id: "rc-2", lane: "DEHAM→ZADUR", origin: "DEHAM", destination: "ZADUR", mode: "OCEAN",
+    carrier: "Maersk Line", kind: "CONTRACT", eq: "40HC", buy: 198000, ccy: "USD", transit: 24,
+    validTo: "2026-09-30",
+    surcharges: [{ code: "THC", desc: "Terminal handling", basis: "PER_CONTAINER", amt: 19500, ccy: "USD" }] },
+  { id: "rc-3", lane: "ZACPT→BRSSZ", origin: "ZACPT", destination: "BRSSZ", mode: "OCEAN",
+    carrier: "CMA CGM", kind: "CONTRACT", eq: "40HC", buy: 199000, ccy: "USD", transit: 22,
+    validTo: "2027-06-30",
+    surcharges: [
+      { code: "THC", desc: "Terminal handling", basis: "PER_CONTAINER", amt: 21000, ccy: "USD" },
+      { code: "ISPS", desc: "Security", basis: "PER_BL", amt: 4500, ccy: "USD" },
+    ] },
+  { id: "rc-4", lane: "ZADUR→ZAJNB", origin: "ZADUR", destination: "ZAJNB", mode: "ROAD",
+    carrier: "N3 Corridor Logistics", kind: "CONTRACT", eq: "40HC", buy: 1850000, ccy: "ZAR", transit: 2,
+    validTo: "2026-09-30",
+    surcharges: [{ code: "FUEL", desc: "Fuel levy", basis: "PERCENT_OF_FREIGHT", amt: 900, ccy: "ZAR" }] },
+];
+
+const MARGIN_RULES = [
+  { id: "mr-1", scope: "CNSHA → ZADUR · OCEAN", dims: 3, bps: 1200, floor: 100000,
+    origin: "CNSHA", destination: "ZADUR", mode: "OCEAN" },
+  { id: "mr-2", scope: null, dims: 0, bps: 1800, floor: 150000 },
+];
+
+const PARTNERS = [
+  { name: "Cape Coastal Forwarding", region: "Western Cape", shipments: 148, feeBps: 500, since: "2025-11" },
+  { name: "Limpopo Border Agents", region: "Beitbridge", shipments: 96, feeBps: 550, since: "2026-01" },
+  { name: "Walvis Bay Logistics", region: "Namibia", shipments: 61, feeBps: 500, since: "2026-03" },
+];
+
+const CUSTOMS_LINES = [
+  { desc: "Cotton knitted T-shirts, printed", hs: "6109.10", value: 48600000, rate: 4500, conf: 0.71, sacu: false },
+  { desc: "LED display panels, 32 inch", hs: "8528.72", value: 31200000, rate: 2500, conf: 0.62, sacu: false },
+  { desc: "Stainless steel fasteners", hs: "7318.15", value: 9450000, rate: 500, conf: 0.94, sacu: false },
+];
+
+/* Lifecycle. `charge` is what the billing consumer accrues on that event. */
+const LIFECYCLE = [
+  { type: "shipment.booked", status: "BOOKED", label: "Booking confirmed", at: "DEHAM", src: "console" },
+  { type: "container.gated_in", status: "BOOKED", label: "Container received at the origin terminal", at: "DEHAM", src: "DCSA" },
+  { type: "container.loaded", status: "BOOKED", label: "Container loaded on the vessel", at: "DEHAM", src: "DCSA" },
+  { type: "vessel.departed", status: "IN_TRANSIT", label: "Vessel departed", at: "DEHAM", src: "DCSA", fee: true },
+  { type: "vessel.arrived", status: "AT_DESTINATION", label: "Vessel arrived at the destination port", at: "ZADUR", src: "DCSA" },
+  { type: "container.discharged", status: "AT_DESTINATION", label: "Container discharged", at: "ZADUR", src: "DCSA" },
+  { type: "entry.submitted", status: "CUSTOMS", label: "Customs entry submitted", at: "ZADUR", src: "console" },
+  { type: "entry.released", status: "CUSTOMS", label: "Cleared by customs", at: "ZADUR", src: "SARS" },
+  { type: "container.gated_out", status: "IN_TRANSIT", label: "Out for delivery", at: "ZADUR", src: "Traccar" },
+  { type: "pod.confirmed", status: "DELIVERED", label: "Delivered", at: "ZAJNB", src: "Traccar" },
+];
+
+const STATUS_TONE = {
+  BOOKED: "", IN_TRANSIT: "accent", AT_DESTINATION: "accent",
+  CUSTOMS: "warn", DELIVERED: "good", CANCELLED: "bad",
+};
+
+const PERSONAS = [
+  { id: "ops", av: "TM", name: "Thandi Mokoena", role: "ops · admin · finance",
+    tenant: "FORGE Freight (Pty) Ltd", type: "OPERATOR",
+    blurb: "Operations lead at the forwarder" },
+  { id: "shipper", av: "UT", name: "Ubuntu Trading", role: "customer",
+    tenant: "Ubuntu Trading (Pty) Ltd", type: "CUSTOMER",
+    blurb: "The shipper whose cargo this is" },
+  { id: "partner", av: "CC", name: "Cape Coastal", role: "ops · admin", rails: true,
+    tenant: "Cape Coastal Forwarding", type: "PARTNER_AGENT",
+    blurb: "A forwarder running on our rails" },
+];
+
+/** Highest act index. Derived, so adding an act does not need three edits. */
+const LAST_ACT = 13;
+
+const ACTS = [
+  { n: "00", t: "Access", d: "Sign in, pick a seat" },
+  { n: "01", t: "Situation", d: "The book on one screen" },
+  { n: "02", t: "Price", d: "Rate cards & margin" },
+  { n: "03", t: "Quote", d: "Price a corridor" },
+  { n: "04", t: "Commit", d: "Book it, atomically" },
+  { n: "05", t: "Movement", d: "One stream, every view" },
+  { n: "06", t: "Clearance", d: "Duty & VAT" },
+  { n: "07", t: "The invoice", d: "One standard document" },
+  { n: "08", t: "Assurance", d: "Four-way match" },
+  { n: "09", t: "Compliance", d: "SARS & external feeds" },
+  { n: "10", t: "The shipper", d: "The other side" },
+];
+const ACTS_RAILS = [
+  { n: "11", t: "The rails", d: "Partner fees" },
+  { n: "12", t: "Underneath", d: "Architecture" },
+  { n: "13", t: "The ask", d: "Two businesses" },
+];
+
+/* ================================================================== state */
+const S = {
+  act: 0,
+  persona: null,
+  portalView: false,
+  events: [],
+  seq: 0,
+  clock: new Date("2026-07-14T06:12:00Z"),
+  quote: null,
+  booked: false,
+  step: -1,          // index into LIFECYCLE already applied
+  rolled: false,
+  charges: [],
+  invoice: null,
+  payments: [],
+  customs: { status: "DRAFT", confirmed: false },
+  audit: null,
+  partners: PARTNERS.map((p) => ({ ...p })),
+  feeCents: 0,       // platform fees accrued this session, ZAR
+};
+
+function tick(minutes) {
+  S.clock = new Date(S.clock.getTime() + minutes * 60000);
+  return new Date(S.clock);
+}
+const hhmm = (d) => d.toISOString().slice(11, 16);
+const dayStamp = (d) => d.toISOString().slice(0, 10) + " " + hhmm(d);
+
+function emit(type, payload, opts = {}) {
+  S.seq += 1;
+  const e = {
+    id: S.seq,
+    eventId: `evt-${String(S.seq).padStart(4, "0")}`,
+    type,
+    at: tick(opts.minutes ?? 40),
+    payload,
+    rails: !!opts.rails,
+    src: opts.src || "console",
+  };
+  S.events.push(e);
+  renderStatusbar();
+  return e;
+}
+
+/* ============================================================ projections */
+const shipmentStatus = () => (S.step < 0 ? null : LIFECYCLE[S.step].status);
+const shipmentRef = () => (S.booked ? "FF-2026-00042" : null);
+
+function freightMarginCents() {
+  // Once charges exist they are the realised figure — the quote is only an
+  // estimate, and showing one in the status bar while the closing slide shows
+  // the other is how a demo loses an investor's trust over R800.
+  if (S.charges.length) return S.charges.reduce((s, c) => s + (c.sell - c.buy), 0);
+  if (!S.quote) return 0;
+  return S.quote.lines.reduce((s, l) => s + (l.sellZar - l.buyZar), 0);
+}
+
+/* ================================================================== chrome */
+function renderRail() {
+  const mk = (list, offset, thread) => list.map((a, i) => {
+    const idx = offset + i;
+    const b = el("button", "act-link");
+    b.type = "button";
+    if (thread) b.dataset.thread = thread;
+    b.setAttribute("aria-current", String(idx === S.act));
+    b.innerHTML = `<span class="n">${a.n}</span><span><span class="t">${a.t}</span><span class="d">${a.d}</span></span>`;
+    b.addEventListener("click", () => go(idx));
+    return b;
+  });
+  const m = $("#acts-main"); m.innerHTML = ""; mk(ACTS, 0).forEach((b) => m.appendChild(b));
+  const r = $("#acts-rails"); r.innerHTML = ""; mk(ACTS_RAILS, ACTS.length, "rails").forEach((b) => r.appendChild(b));
+}
+
+function renderStatusbar() {
+  $("#sb-events").textContent = String(S.events.length);
+  const st = shipmentStatus();
+  $("#sb-status").textContent = st ? st.replace(/_/g, " ") : "—";
+  $("#sb-margin").textContent = S.quote ? money(freightMarginCents(), "ZAR") : "—";
+  $("#sb-fees").textContent = money(S.feeCents, "ZAR");
+  $("#prev-btn").disabled = S.act === 0;
+  $("#next-btn").disabled = S.act === LAST_ACT;
+  $("#next-btn").textContent = S.act === LAST_ACT ? "End" : "Continue →";
+}
+
+function go(n) {
+  S.act = Math.max(0, Math.min(LAST_ACT, n));
+  $$(".act").forEach((s) => s.classList.remove("on"));
+  const target = $(`#act-${S.act}`);
+  target.classList.add("on");
+  renderRail();
+  renderStatusbar();
+  RENDER[S.act] && RENDER[S.act]();
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
+/* =================================================================== map */
+const MAP_W = 2000, MAP_H = 1000;
+const proj = (lat, lon) => [((lon + 180) / 360) * MAP_W, ((90 - lat) / 180) * MAP_H];
+
+function drawMap(host, lanes, opts = {}) {
+  const pts = [];
+  lanes.forEach((l) => {
+    [l.origin, l.destination].forEach((c) => {
+      const p = PLACES[c];
+      if (p) pts.push({ code: c, name: p[0], xy: proj(p[1], p[2]) });
+    });
+  });
+  if (!pts.length) { host.innerHTML = `<div class="center muted small" style="padding:40px">No corridors yet.</div>`; return; }
+
+  const xs = pts.map((p) => p.xy[0]), ys = pts.map((p) => p.xy[1]);
+  const padX = opts.pad ?? 190, padY = opts.pad ?? 150;
+  let x0 = Math.min(...xs) - padX, x1 = Math.max(...xs) + padX;
+  let y0 = Math.min(...ys) - padY, y1 = Math.max(...ys) + padY;
+  const aspect = opts.aspect ?? 2.6;
+  let w = x1 - x0, h = y1 - y0;
+  if (w / h < aspect) { const need = h * aspect; const cx = (x0 + x1) / 2; x0 = cx - need / 2; x1 = cx + need / 2; w = need; }
+  else { const need = w / aspect; const cy = (y0 + y1) / 2; y0 = cy - need / 2; y1 = cy + need / 2; h = need; }
+  x0 = Math.max(0, Math.min(x0, MAP_W - w)); y0 = Math.max(0, Math.min(y0, MAP_H - h));
+
+  const seen = new Map();
+  pts.forEach((p) => seen.set(p.code, p));
+
+  const lanePath = (l) => {
+    const a = PLACES[l.origin], b = PLACES[l.destination];
+    if (!a || !b) return "";
+    const [ax, ay] = proj(a[1], a[2]), [bx, by] = proj(b[1], b[2]);
+    const mx = (ax + bx) / 2, my = (ay + by) / 2;
+    const dx = bx - ax, dy = by - ay;
+    const len = Math.hypot(dx, dy) || 1;
+    // Bow the great-circle-ish arc perpendicular to the chord, scaled by length.
+    const k = Math.min(0.17, 26 / len) * len * 0.5;
+    return `M${ax.toFixed(1)} ${ay.toFixed(1)} Q${(mx - (dy / len) * k).toFixed(1)} ${(my + (dx / len) * k).toFixed(1)} ${bx.toFixed(1)} ${by.toFixed(1)}`;
+  };
+
+  const r = 4.6 * (w / Math.max(240, host.clientWidth || 720));
+  const maxV = Math.max(...lanes.map((l) => l.value || 1), 1);
+  const laneSvg = lanes.map((l) => {
+    const stroke = l.tone === "critical" ? "var(--critical)" : l.tone === "rails" ? "var(--rails)" : "var(--accent)";
+    const wgt = (w / Math.max(240, host.clientWidth || 720)) * (1.4 + (l.value || 1) / maxV * 2.2);
+    return `<path class="lane${l.live ? " live" : ""}" d="${lanePath(l)}" stroke="${stroke}" stroke-width="${wgt.toFixed(1)}" opacity="${l.tone === "critical" ? .95 : .8}"/>`;
+  }).join("");
+
+  const nodes = [...seen.values()].map((p) => {
+    const [x, y] = p.xy;
+    return `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${r.toFixed(1)}" fill="var(--surface)" stroke="var(--accent)" stroke-width="${(r * 0.5).toFixed(1)}"/>`;
+  }).join("");
+
+  // Greedy labels: place by descending x so western ports win ties, and drop
+  // any that would collide with one already placed.
+  // viewBox units per rendered pixel — glyphs are sized in screen pixels so a
+  // narrow side map and a wide dashboard map are equally legible.
+  const upp = w / Math.max(240, host.clientWidth || 720);
+  const fs = 11.5 * upp;
+  const placed = [];
+  const labels = [...seen.values()].sort((a, b) => a.xy[0] - b.xy[0]).map((p) => {
+    const [x, y] = p.xy;
+    const box = { x: x + fs * 0.8, y: y - fs * 0.62, w: p.code.length * fs * 0.63, h: fs * 1.35 };
+    if (placed.some((q) => !(box.x > q.x + q.w || box.x + box.w < q.x || box.y > q.y + q.h || box.y + box.h < q.y))) return "";
+    placed.push(box);
+    return `<text class="port-label" x="${(x + fs * 0.85).toFixed(1)}" y="${(y + fs * 0.36).toFixed(1)}" font-size="${fs.toFixed(1)}" stroke-width="${(fs * 0.26).toFixed(1)}">${p.code}</text>`;
+  }).join("");
+
+  host.innerHTML =
+    `<svg viewBox="${x0.toFixed(1)} ${y0.toFixed(1)} ${w.toFixed(1)} ${h.toFixed(1)}" role="img" aria-label="Corridor map">
+      <rect x="0" y="0" width="${MAP_W}" height="${MAP_H}" fill="var(--sea)"/>
+      <path d="${LAND_PATH}" fill="var(--land)" stroke="var(--land-edge)" stroke-width="1"/>
+      ${laneSvg}${nodes}${labels}
+    </svg>`;
+  return { ports: seen.size, lanes: lanes.length };
+}
+
+/* ================================================================= act 0 */
+function renderPersonas() {
+  const host = $("#persona-list");
+  host.innerHTML = "";
+  PERSONAS.forEach((p) => {
+    const b = el("button");
+    b.type = "button";
+    b.setAttribute("aria-pressed", String(S.persona?.id === p.id));
+    b.innerHTML = `<span class="av${p.rails ? " rails" : ""}">${p.av}</span>
+      <span><span class="nm">${p.name}</span><span class="rl">${p.tenant} · ${p.role}</span></span>`;
+    b.addEventListener("click", () => {
+      S.persona = p;
+      renderPersonas();
+      $("#sign-in").disabled = false;
+      $("#sign-in").textContent = `Enter console as ${p.name}`;
+    });
+    host.appendChild(b);
+  });
+}
+
+$("#sign-in").addEventListener("click", () => {
+  if (!S.persona) return;
+  const w = $("#who");
+  w.hidden = false;
+  $("#who-av").textContent = S.persona.av;
+  $("#who-name").textContent = S.persona.tenant;
+  $("#who-role").textContent = S.persona.role;
+  $("#conn").textContent = `${S.persona.type} · connected`;
+  emit("session.started", { tenant: S.persona.tenant, type: S.persona.type }, { minutes: 0 });
+  go(1);
+});
+
+/* ================================================================= act 1 */
+const BOOK = [
+  { ref: "FF-2026-00031", o: "CNSHA", d: "ZADUR", st: "IN_TRANSIT", when: "12 Jul, 04:20" },
+  { ref: "FF-2026-00033", o: "ZADUR", d: "ZAJNB", st: "CUSTOMS", when: "12 Jul, 09:05" },
+  { ref: "FF-2026-00035", o: "AEJEA", d: "ZADUR", st: "IN_TRANSIT", when: "13 Jul, 11:40" },
+  { ref: "FF-2026-00038", o: "SGSIN", d: "ZAPLZ", st: "DELIVERED", when: "13 Jul, 16:02" },
+  { ref: "FF-2026-00040", o: "NLRTM", d: "ZACPT", st: "IN_TRANSIT", when: "14 Jul, 05:55" },
+];
+const BOOK_EXC = [
+  { code: "CUSTOMS_QUERY", ref: "FF-2026-00033", detail: "SARS query on line 2 — tariff heading disputed", tone: "warn" },
+  { code: "CONGESTION_DELAY", ref: "FF-2026-00031", detail: "Durban berth congestion, 3 days", tone: "warn" },
+];
+
+function renderDash() {
+  const lanes = [
+    { origin: "CNSHA", destination: "ZADUR", value: 6, tone: "critical", live: true },
+    { origin: "DEHAM", destination: "ZADUR", value: 4, live: true },
+    { origin: "AEJEA", destination: "ZADUR", value: 3, live: true },
+    { origin: "SGSIN", destination: "ZAPLZ", value: 2 },
+    { origin: "NLRTM", destination: "ZACPT", value: 3, live: true },
+    { origin: "ZADUR", destination: "ZAJNB", value: 5, tone: "critical" },
+  ];
+  if (S.booked) lanes.push({ origin: "DEHAM", destination: "ZADUR", value: 2, live: true });
+
+  const tiles = [
+    { k: "Active shipments", v: 23 + (S.booked ? 1 : 0), cls: "accent" },
+    { k: "In transit", v: 11, cls: "" },
+    { k: "Customs hold", v: 3, cls: "warn" },
+    { k: "Open exceptions", v: BOOK_EXC.length, cls: "bad" },
+  ];
+  $("#dash-tiles").innerHTML = tiles.map((t) =>
+    `<div class="tile ${t.cls}"><div class="k">${t.k}</div><div class="v">${t.v}</div></div>`).join("");
+
+  $("#dash-legend").innerHTML = `<span class="tag bad"><i></i>Lane with open exception</span>`;
+  const info = drawMap($("#dash-map"), lanes, { aspect: 2.9 });
+  $("#dash-map-foot").textContent = `${info.lanes} lanes · ${info.ports} locations · weighted by volume`;
+
+  const rows = [...BOOK];
+  if (S.booked) rows.unshift({ ref: shipmentRef(), o: "DEHAM", d: "ZADUR", st: shipmentStatus(), when: "14 Jul, 06:52", isNew: true });
+  $("#dash-ships").innerHTML =
+    `<thead><tr><th>Reference</th><th>Route</th><th>Status</th><th>Booked</th></tr></thead><tbody>` +
+    rows.map((r) => `<tr${r.isNew ? ' class="new-row"' : ""}>
+      <td class="p mono">${r.ref}</td>
+      <td><span class="mono p">${r.o}</span> → <span class="mono p">${r.d}</span></td>
+      <td><span class="tag ${STATUS_TONE[r.st] || ""}"><i></i>${r.st.replace(/_/g, " ")}</span></td>
+      <td>${r.when}</td></tr>`).join("") + `</tbody>`;
+
+  $("#dash-exc").innerHTML = BOOK_EXC.map((e) =>
+    `<div style="border:1px solid var(--hairline);border-radius:3px;padding:10px 11px">
+      <div class="row" style="justify-content:space-between;margin-bottom:5px">
+        <span class="tag ${e.tone}"><i></i>${e.code.replace(/_/g, " ")}</span>
+        <span class="mono muted" style="font-size:10.5px">${e.ref}</span>
+      </div>
+      <div class="small" style="color:var(--t2)">${e.detail}</div>
+    </div>`).join("");
+}
+
+/* ================================================================= act 2 */
+function renderRates() {
+  $("#rate-tbl").innerHTML =
+    `<thead><tr><th>Lane</th><th>Carrier</th><th>Equip</th><th class="r">Buy</th><th>Transit</th><th>Valid to</th><th>Surcharges</th></tr></thead><tbody>` +
+    RATE_CARDS.map((c) => `<tr>
+      <td><span class="mono p">${c.origin}</span> → <span class="mono p">${c.destination}</span> <span class="muted" style="font-size:10.5px">${c.mode}</span></td>
+      <td>${c.carrier} <span class="tag" style="margin-left:4px">${c.kind}</span></td>
+      <td>${c.eq}</td>
+      <td class="r p tab">${money(c.buy, c.ccy)}</td>
+      <td>${c.transit}d</td>
+      <td>${c.validTo}</td>
+      <td>${c.surcharges.map((s) => `<span class="tag" title="${esc(s.desc)}">${s.code}</span>`).join(" ")}</td>
+    </tr>`).join("") + `</tbody>`;
+
+  $("#margin-tbl").innerHTML =
+    `<thead><tr><th>Applies to</th><th class="r">Margin</th><th class="r">Floor</th></tr></thead><tbody>` +
+    MARGIN_RULES.map((r) => `<tr>
+      <td>${r.scope ? `<span class="mono p">${r.scope}</span>` : `<span class="tag accent">Everything (catch-all)</span>`}
+        <span class="muted" style="font-size:10px;margin-left:4px">${r.dims} of 4 dimensions</span></td>
+      <td class="r p tab">${pct(r.bps)}</td>
+      <td class="r tab">${(r.floor / 100).toLocaleString("en-US", { minimumFractionDigits: 2 })}</td>
+    </tr>`).join("") + `</tbody>`;
+}
+
+/* ================================================================= act 3 */
+function resolveRule(card) {
+  const match = MARGIN_RULES.filter((r) => !r.scope ||
+    (r.origin === card.origin && r.destination === card.destination && r.mode === card.mode));
+  return match.sort((a, b) => b.dims - a.dims)[0];
+}
+
+function priceQuote() {
+  const card = RATE_CARDS.find((c) => c.id === $("#q-lane").value) || RATE_CARDS[1];
+  const qty = Math.max(1, Math.min(20, Number($("#q-qty").value) || 1));
+  const bps = Number($("#q-margin").value);
+  const rule = resolveRule(card);
+  const toZar = (c, ccy) => roundHalfUp(c * (FX[ccy] || 1));
+
+  const mk = (code, desc, quantity, buyEach, ccy) => {
+    const buy = buyEach * quantity;
+    // The floor is a minimum margin per quote line, held in ZAR cents. It has
+    // to be converted into the line's currency before it can be compared with
+    // one — applying R1 500 as though it were $1 500 turns an 18% margin into
+    // a 69% one, which is not a number any shipper would accept.
+    const floorInCcy = roundHalfUp(rule.floor / (FX[ccy] || 1));
+    const sell = Math.max(roundHalfUp(buy * (1 + bps / 10000)), buy + floorInCcy);
+    return { code, desc, quantity, buyEach, buy, sell, ccy, buyZar: toZar(buy, ccy), sellZar: toZar(sell, ccy) };
+  };
+
+  const lines = [mk("FRT", `${card.mode} freight ${card.origin}→${card.destination} (${card.carrier})`, qty, card.buy, card.ccy)];
+  const freightBuy = card.buy * qty;
+  card.surcharges.forEach((s) => {
+    if (s.basis === "PERCENT_OF_FREIGHT") {
+      lines.push(mk(s.code, s.desc + " (% of freight)", 1, roundHalfUp(freightBuy * s.amt / 10000), s.ccy));
+    } else if (s.basis === "PER_CONTAINER") {
+      lines.push(mk(s.code, s.desc, qty, s.amt, s.ccy));
+    } else {
+      lines.push(mk(s.code, s.desc, 1, s.amt, s.ccy));
+    }
+  });
+
+  const totals = {};
+  lines.forEach((l) => { totals[l.ccy] = (totals[l.ccy] || 0) + l.sell; });
+  S.quote = { card, qty, bps, rule, lines, totals,
+    id: "Q-2026-0187", ref: "Q-2026-0187",
+    marginZar: lines.reduce((s, l) => s + (l.sellZar - l.buyZar), 0),
+    sellZar: lines.reduce((s, l) => s + l.sellZar, 0),
+    buyZar: lines.reduce((s, l) => s + l.buyZar, 0) };
+  return S.quote;
+}
+
+function renderQuote() {
+  if (!$("#q-lane").options.length) {
+    $("#q-lane").innerHTML = RATE_CARDS.map((c) =>
+      `<option value="${c.id}"${c.id === "rc-2" ? " selected" : ""}>${c.origin} → ${c.destination} · ${c.mode}</option>`).join("");
+  }
+  const q = priceQuote();
+  $("#q-margin-out").textContent = pct(q.bps);
+  $("#q-rule-note").textContent = q.rule.scope ? "resolved rule · lane-specific" : "resolved rule · tenant default";
+  $("#q-carrier").textContent = `${q.card.carrier} · ${q.card.kind}`;
+  $("#q-transit").textContent = `${q.card.transit} days transit`;
+
+  $("#q-lines").innerHTML =
+    `<thead><tr><th>Code</th><th>Description</th><th class="r">Qty</th><th class="r">Buy</th><th class="r">Sell</th></tr></thead><tbody>` +
+    q.lines.map((l) => `<tr>
+      <td class="mono p">${l.code}</td>
+      <td>${esc(l.desc)}</td>
+      <td class="r tab">${l.quantity}</td>
+      <td class="r tab muted">${money(l.buy, l.ccy)}</td>
+      <td class="r tab p">${money(l.sell, l.ccy)}</td>
+    </tr>`).join("") + `</tbody>`;
+
+  const marginPct = q.buyZar ? (q.marginZar / q.buyZar) * 100 : 0;
+  $("#q-totals").innerHTML =
+    Object.entries(q.totals).map(([c, v]) => `<div class="kv"><span class="k">Total ${c}</span><span class="v">${money(v, c)}</span></div>`).join("") +
+    `<div class="kv"><span class="k">Buy, converted</span><span class="v muted">${money(q.buyZar, "ZAR")}</span></div>
+     <div class="kv tot"><span class="k">Gross margin</span><span class="v accent">${money(q.marginZar, "ZAR")} <span class="muted" style="font-weight:400">· ${marginPct.toFixed(1)}%</span></span></div>`;
+  renderStatusbar();
+}
+
+["#q-lane", "#q-eq", "#q-qty", "#q-margin", "#q-cust"].forEach((sel) =>
+  $(sel).addEventListener("input", renderQuote));
+
+$("#q-issue").addEventListener("click", () => {
+  const q = priceQuote();
+  emit("quote.issued", { quoteId: q.id, lane: `${q.card.origin}→${q.card.destination}`, totalSell: money(q.sellZar, "ZAR"), marginBps: q.bps }, { minutes: 3 });
+  $("#q-issue").textContent = "Quote issued ✓";
+  setTimeout(() => ($("#q-issue").textContent = "Issue quote"), 1800);
+  go(4);
+});
+$("#q-pdf").addEventListener("click", () => {
+  $("#q-pdf").textContent = "PDF generated";
+  setTimeout(() => ($("#q-pdf").textContent = "Download PDF"), 1600);
+});
+
+/* ================================================================= act 4 */
+function renderBook() {
+  const q = S.quote || priceQuote();
+  $("#book-ref").textContent = q.ref;
+  $("#book-summary").innerHTML = `
+    <div class="kv"><span class="k">Customer</span><span class="v">${esc($("#q-cust").value)}</span></div>
+    <div class="kv"><span class="k">Lane</span><span class="v">${q.card.origin} → ${q.card.destination}</span></div>
+    <div class="kv"><span class="k">Carrier</span><span class="v">${esc(q.card.carrier)}</span></div>
+    <div class="kv"><span class="k">Equipment</span><span class="v">${q.qty} × ${$("#q-eq").value}</span></div>
+    <div class="kv"><span class="k">Incoterm</span><span class="v">CIF</span></div>
+    <div class="kv tot"><span class="k">Total sell</span><span class="v accent">${money(q.sellZar, "ZAR")}</span></div>`;
+
+  const tx = [
+    { t: "quotes", d: "status → ACCEPTED" },
+    { t: "bookings", d: "row created, customer linked" },
+    { t: "shipments", d: `reference ${shipmentRef() || "FF-2026-…"} allocated from a sequence` },
+    { t: "events", d: "shipment.booked appended" },
+  ];
+  $("#book-tx").innerHTML = tx.map((n) =>
+    `<div class="node${S.booked ? " core" : ""}"><div class="nt">${n.t}</div><div class="nd">${n.d}</div></div>`).join("");
+
+  const st = $("#book-status");
+  st.className = "tag " + (S.booked ? "good" : "");
+  st.innerHTML = `<i></i>${S.booked ? "Booked" : "Draft"}`;
+  $("#book-btn").disabled = S.booked;
+  $("#book-btn").textContent = S.booked ? "Booked ✓" : "Accept & book";
+  $("#book-hint").textContent = S.booked
+    ? "Sanctions screening returned clear; the shipment is live."
+    : "Screens the customer against sanctions first.";
+
+  renderEventLog($("#book-events"), 6);
+}
+
+function renderEventLog(host, limit) {
+  const evts = S.events.slice(-limit).reverse();
+  host.innerHTML = evts.length
+    ? evts.map((e) => `<div class="evt${e.rails ? " rails" : ""}">
+        <span class="ts">${hhmm(e.at)} · ${e.src}</span>
+        <span class="ty">${e.type}</span>
+        <span class="pl">${esc(Object.entries(e.payload).map(([k, v]) => `${k}=${v}`).join("  "))}</span>
+      </div>`).join("")
+    : `<p class="small muted" style="margin:0">Nothing yet — actions in this walkthrough append here.</p>`;
+}
+
+$("#book-btn").addEventListener("click", () => {
+  if (S.booked) return;
+  const q = S.quote || priceQuote();
+  emit("party.screened", { party: $("#q-cust").value, result: "CLEAR", source: "yente" }, { minutes: 1 });
+  emit("quote.accepted", { quoteId: q.ref }, { minutes: 1 });
+  S.booked = true;
+  S.step = 0;
+  emit("shipment.booked", { reference: "FF-2026-00042", lane: `${q.card.origin}→${q.card.destination}`, containers: q.qty }, { minutes: 0 });
+  accrueFor(LIFECYCLE[0], q);
+  renderBook();
+  renderStatusbar();
+});
+
+/* ================================================================= act 5 */
+function laneProgress() {
+  // Fraction of the journey completed, used to place the live marker.
+  if (S.step < 0) return 0;
+  return Math.min(1, S.step / (LIFECYCLE.length - 1));
+}
+
+function renderTrack() {
+  const q = S.quote || priceQuote();
+  const legs = [
+    { origin: q.card.origin, destination: q.card.destination, value: 5, live: S.step >= 3 && S.step < 5,
+      tone: S.rolled ? "critical" : "accent" },
+  ];
+  if (S.step >= 8) legs.push({ origin: "ZADUR", destination: "ZAJNB", value: 3, live: S.step === 8, tone: "accent" });
+
+  $("#track-lane").textContent = `${q.card.origin} → ${q.card.destination}`;
+  const info = drawMap($("#track-map"), legs, { aspect: 2.5 });
+  $("#track-foot").textContent = S.step < 0
+    ? "Not yet booked"
+    : `${LIFECYCLE[S.step].label} · ${LIFECYCLE[S.step].at} · via ${LIFECYCLE[S.step].src}`;
+  $("#track-eta").textContent = S.rolled
+    ? `ETA +7d — rolled to next sailing`
+    : `${Math.max(0, q.card.transit - Math.round(laneProgress() * q.card.transit))}d to arrival`;
+
+  const st = shipmentStatus();
+  const tag = $("#ship-status");
+  tag.className = "tag " + (st ? (STATUS_TONE[st] || "") : "");
+  tag.innerHTML = `<i></i>${st ? st.replace(/_/g, " ") : "not booked"}`;
+
+  $("#track-tl").innerHTML = LIFECYCLE.map((m, i) => {
+    const cls = i < S.step ? "done" : i === S.step ? "now" : "";
+    const ev = S.events.find((e) => e.type === m.type);
+    return `<div class="tl-step ${cls}">
+      <div class="tl-rail"><span class="tl-dot"></span>${i < LIFECYCLE.length - 1 ? '<span class="tl-line"></span>' : ""}</div>
+      <div class="tl-body"><div class="tl-t">${m.label}</div>
+        <div class="tl-m">${ev ? dayStamp(ev.at) : "—"}</div></div>
+    </div>`;
+  }).join("");
+
+  const exc = [];
+  if (S.rolled) exc.push({ code: "BOOKING_ROLLED", detail: "Carrier moved the booking to the next sailing — ETA +7 days", tone: "bad" });
+  if (S.step >= 6 && S.customs.status !== "RELEASED") exc.push({ code: "CUSTOMS_QUERY", detail: "Entry submitted, awaiting SARS outcome", tone: "warn" });
+  $("#exc-board").innerHTML = exc.length ? exc.map((e) =>
+    `<div style="border:1px solid var(--hairline);border-radius:3px;padding:10px 11px">
+      <div class="row" style="justify-content:space-between;margin-bottom:5px">
+        <span class="tag ${e.tone}"><i></i>${e.code.replace(/_/g, " ")}</span>
+        <span class="mono muted" style="font-size:10.5px">${shipmentRef() || "—"}</span>
+      </div><div class="small" style="color:var(--t2)">${e.detail}</div>
+    </div>`).join("")
+    : `<p class="small muted" style="margin:0">Nothing open on this shipment.</p>`;
+
+  $("#adv-btn").disabled = !S.booked || S.step >= LIFECYCLE.length - 1;
+  $("#adv-btn").textContent = !S.booked ? "Book a shipment first"
+    : S.step >= LIFECYCLE.length - 1 ? "Delivered ✓"
+    : `Advance → ${LIFECYCLE[S.step + 1].label}`;
+  $("#roll-btn").disabled = !S.booked || S.rolled || S.step >= 4;
+
+  $("#track-hood").innerHTML = `
+    <p class="small muted" style="margin:0 0 10px">
+      Three wire formats, one canonical event. The adapter's job is to answer
+      "which shipment is this about?" — DCSA matches on container number or carrier
+      booking reference, Traccar on device, EDIFACT on the partner's own reference.
+      Match by tenant-scoped lookup, never by trusting an id in the payload.
+    </p>` +
+    ["lifecycle-projector — advances shipment status",
+     "billing-accrual — writes charges, and the platform fee for partner tenants",
+     "ledger-sink — maps financial events into the revenue ontology",
+     "workflow-signaler — wakes the Temporal timer watching for a missed milestone",
+     "notification-dispatcher — WhatsApp/email to the shipper"]
+      .map((c) => `<div class="evt"><span class="ts">consumer</span><span class="ty">${c.split(" — ")[0]}</span><span class="pl">${c.split(" — ")[1]}</span></div>`).join("");
+}
+
+/* ---------------------------------------------------- the charge taxonomy
+   29 canonical codes in the product; the ones this shipment touches are here.
+   `errorRate` is not decoration — fuel, destination terminal handling and
+   documentation fees carry the highest documented error rates precisely
+   because AP scrutinises them least and the forwarder has the most discretion
+   over them, so the audit spends its attention there. */
+const CODES = {
+  FRT:  { label: "Ocean freight",              cat: "FREIGHT",             basis: "container", prov: "MARKED_UP",            tax: true,  err: "LOW" },
+  OHC:  { label: "Origin terminal handling",   cat: "ORIGIN",              basis: "container", prov: "PASS_THROUGH",         tax: true,  err: "MEDIUM" },
+  BAF:  { label: "Bunker adjustment factor",   cat: "FUEL_SURCHARGE",      basis: "container", prov: "PASS_THROUGH",         tax: true,  err: "HIGH" },
+  THC:  { label: "Destination terminal handling", cat: "DESTINATION",      basis: "container", prov: "PASS_THROUGH",         tax: true,  err: "HIGH" },
+  ISPS: { label: "Port security (ISPS)",       cat: "DESTINATION",         basis: "container", prov: "PASS_THROUGH",         tax: true,  err: "MEDIUM" },
+  DOC:  { label: "Documentation fee",          cat: "DOCUMENTATION",       basis: "document",  prov: "FORWARDER_ORIGINATED", tax: true,  err: "HIGH" },
+  CCL:  { label: "Customs clearance",          cat: "CUSTOMS",             basis: "shipment",  prov: "FORWARDER_ORIGINATED", tax: true,  err: "MEDIUM" },
+  DTY:  { label: "Customs duty & import VAT",  cat: "DUTY_TAX",            basis: "shipment",  prov: "PASS_THROUGH",         tax: false, err: "LOW" },
+  DEM:  { label: "Demurrage",                  cat: "DEMURRAGE_DETENTION", basis: "day",       prov: "PASS_THROUGH",         tax: true,  err: "HIGH" },
+  PLF:  { label: "Platform fee",               cat: "PLATFORM_FEE",        basis: "%",         prov: "FORWARDER_ORIGINATED", tax: true,  err: "LOW" },
+  MSC:  { label: "Other charge",                cat: "OTHER",              basis: "shipment",  prov: "FORWARDER_ORIGINATED", tax: true,  err: "MEDIUM" },
+};
+
+const CAT_ORDER = ["ORIGIN", "FREIGHT", "FUEL_SURCHARGE", "DESTINATION", "CUSTOMS",
+  "DUTY_TAX", "DOCUMENTATION", "DEMURRAGE_DETENTION", "PLATFORM_FEE", "OTHER"];
+const CAT_LABEL = {
+  ORIGIN: "Origin charges", FREIGHT: "Main carriage", FUEL_SURCHARGE: "Fuel & currency surcharges",
+  DESTINATION: "Destination & port charges", CUSTOMS: "Customs clearance", DUTY_TAX: "Duties & taxes",
+  DOCUMENTATION: "Documentation", DEMURRAGE_DETENTION: "Demurrage & detention", PLATFORM_FEE: "Platform fees", OTHER: "Other charges",
+};
+const PROV_LABEL = { PASS_THROUGH: "At cost", MARKED_UP: "Third party", FORWARDER_ORIGINATED: "Our service" };
+const PROV_TAG = { PASS_THROUGH: "", MARKED_UP: "accent", FORWARDER_ORIGINATED: "rails" };
+
+/* The issuing company, from its own billing profile. Another forwarder on the
+   platform issues under its own — nothing here is a platform constant. */
+const ISSUER = {
+  legal: "FORGE Freight (Pty) Ltd", trading: "FORGE Freight",
+  reg: "2019/447281/07", vat: "4820291837", ccn: "20418877",
+  addr: "Unit 7, Bayhead Business Park · 14 Langeberg Road · Bayhead, Durban 4001",
+  bank: "Standard Bank", acct: "042 118 774", branch: "051001", swift: "SBZAZAJJ",
+  prefix: "FF", terms: 30, vatBps: 1500,
+};
+
+/* Charge lines carry their taxonomy, quantity and unit price, because that is
+   what makes a line re-derivable — and a line that cannot be re-derived is a
+   line the audit has to pass. */
+function ch(code, over) {
+  // Unknown codes fall back to the Other bucket rather than being dropped —
+  // dropping a line loses money, and refusing the invoice stops the forwarder
+  // billing at all. The fallback is visible so someone maps it.
+  const d = CODES[code] || CODES.MSC;
+  const qty = over.qty ?? 1;
+  return {
+    code, kind: over.kind || "SURCHARGE", desc: over.desc || d.label,
+    cat: d.cat, prov: over.prov || d.prov, basis: d.basis, qty,
+    unit: over.unit, sell: over.unit * qty, buy: over.buy ?? null,
+    // What the contract says this unit should be, where a contract covers it.
+    // A line with no contract reference is not wrong — it is unmatchable, and
+    // the audit reports that separately.
+    contract: over.contract ?? null,
+    vatBps: d.tax ? ISSUER.vatBps : 0, ccy: "ZAR", on: over.on, vendor: over.vendor || null,
+  };
+}
+
+function accrueFor(m, q) {
+  // Idempotent on the triggering event, exactly like the real consumer: a
+  // release reached from the customs screen and one reached from the lifecycle
+  // are the same accrual, and billing it twice is the bug that matters most.
+  if (S.charges.some((c) => c.on === m.type)) return;
+
+  // What the billing consumer writes when this event lands. The taxonomy comes
+  // from the code itself: left on the column defaults, every automatically
+  // accrued line would claim to be an uncategorised charge the forwarder
+  // originated with no cost behind it — the exact shape the audit passes.
+  if (m.type === "shipment.booked") {
+    // Everything quoted carries the forwarder's margin by construction — it is
+    // priced buy + margin. Calling any of it a pass-through disbursement would
+    // make the audit fire on the platform's own arithmetic.
+    q.lines.forEach((l) => {
+      const code = CODES[l.code] ? l.code : (l.code === "THC-D" ? "THC" : "FRT");
+      S.charges.push(ch(code, {
+        kind: code === "FRT" ? "FREIGHT" : "SURCHARGE",
+        desc: l.desc, qty: l.quantity || 1,
+        unit: roundHalfUp(l.sellZar / (l.quantity || 1)), buy: l.buyZar,
+        prov: "MARKED_UP", on: "shipment.booked", vendor: q.card.carrier,
+      }));
+    });
+
+    // The origin agent's own invoice. Billed at the terminal's published rate
+    // rather than the rate in the agency agreement — the single commonest
+    // handling-charge error in the trade, and small enough per container that
+    // nobody queries it. Act 8 does.
+    S.charges.push(ch("OHC", {
+      qty: q.qty || 1, unit: 215000, buy: 215000 * (q.qty || 1), contract: 185000,
+      on: "shipment.booked", desc: "Origin terminal handling", vendor: "Origin agent",
+    }));
+
+    // The carrier's bunker surcharge. Nothing on this platform can check it
+    // until a fuel index is licensed, and the audit says so rather than
+    // passing it.
+    S.charges.push(ch("BAF", {
+      qty: q.qty || 1, unit: 420000, buy: 420000 * (q.qty || 1),
+      on: "shipment.booked", desc: "Bunker adjustment factor", vendor: q.card.carrier,
+    }));
+
+    // Charged per bill of lading, not per container. This one is billed twice.
+    S.charges.push(ch("DOC", {
+      kind: "FEE", qty: 2, unit: 85000, on: "shipment.booked",
+      desc: "Documentation fee",
+    }));
+  }
+  if (m.type === "vessel.departed" && S.persona?.type === "PARTNER_AGENT") {
+    const freight = q.lines.find((l) => l.code === "FRT");
+    const fee = roundHalfUp(freight.sellZar * 500 / 10000);
+    S.charges.push(ch("PLF", {
+      kind: "FEE", desc: "Platform fee (5% of freight sell)", qty: 1, unit: fee,
+      buy: 0, on: "vessel.departed",
+    }));
+    S.feeCents += fee;
+  }
+  if (m.type === "container.gated_out") {
+    // Four days of demurrage from the terminal. The gate clock says two are
+    // chargeable; nobody can tell without the terminal feed.
+    S.charges.push(ch("DEM", {
+      kind: "DISBURSEMENT", qty: 4, unit: 95000, buy: 380000,
+      desc: "Demurrage, Durban Container Terminal", on: "container.gated_out",
+      vendor: "Transnet Port Terminals",
+    }));
+  }
+  if (m.type === "entry.released") {
+    S.charges.push(ch("DTY", {
+      kind: "DISBURSEMENT", qty: 1, unit: customsTotals().total, buy: customsTotals().total,
+      desc: "Duty & VAT disbursed to SARS", on: "entry.released", vendor: "SARS",
+    }));
+    S.charges.push(ch("CCL", {
+      kind: "FEE", qty: 1, unit: 125000, buy: 45000, desc: "Clearing fee", on: "entry.released",
+    }));
+  }
+}
+
+/* ------------------------------------------------------- the document */
+const lineVat = (sell, bps) => roundHalfUp(Math.abs(sell) * bps / 10000) * (sell < 0 ? -1 : 1);
+
+function invoiceDoc() {
+  const lines = S.charges.filter((c) => c.kind !== "FEE" || c.code !== "PLF");
+  const sections = CAT_ORDER
+    .map((cat) => ({ cat, label: CAT_LABEL[cat], lines: lines.filter((l) => l.cat === cat) }))
+    .filter((s) => s.lines.length)
+    .map((s) => ({
+      ...s,
+      sub: s.lines.reduce((a, l) => a + l.sell, 0),
+      vat: s.lines.reduce((a, l) => a + lineVat(l.sell, l.vatBps), 0),
+    }));
+  const sub = sections.reduce((a, s) => a + s.sub, 0);
+  const vat = sections.reduce((a, s) => a + s.vat, 0);
+  const by = (p) => lines.filter((l) => l.prov === p).reduce((a, l) => a + l.sell, 0);
+  return {
+    sections, sub, vat, total: sub + vat,
+    pass: by("PASS_THROUGH"), marked: by("MARKED_UP"), own: by("FORWARDER_ORIGINATED"),
+  };
+}
+
+function renderDoc() {
+  const panel = $("#doc-panel");
+  if (!S.invoice) { panel.hidden = true; return; }
+  panel.hidden = false;
+  const d = invoiceDoc();
+  const paid = S.payments.reduce((a, p) => a + p.amt, 0);
+  const split = (label, cents) => `<div class="kv"><span class="k">${label}</span>
+    <span class="v">${money(cents, "ZAR")}</span></div>`;
+
+  $("#doc-body").innerHTML = `
+    <div class="row" style="justify-content:space-between;align-items:flex-start;gap:22px;
+         border-bottom:1px solid var(--hairline);padding:4px 0 14px;margin-bottom:14px">
+      <div>
+        <div class="p" style="font-size:16px;font-weight:600">${esc(ISSUER.trading)}</div>
+        <div class="small muted">${esc(ISSUER.legal)}</div>
+        <div class="small muted" style="margin-top:6px;max-width:320px">${esc(ISSUER.addr)}</div>
+        <div class="small muted" style="margin-top:6px">
+          Reg <span class="mono">${ISSUER.reg}</span> ·
+          VAT <span class="mono">${ISSUER.vat}</span> ·
+          Customs client <span class="mono">${ISSUER.ccn}</span></div>
+      </div>
+      <div style="text-align:right">
+        <div class="eyebrow">Freight invoice</div>
+        <div class="mono p" style="font-size:19px;font-weight:600">${esc(S.invoice.number)}</div>
+        <div class="small muted" style="margin-top:7px">Net ${ISSUER.terms} days from date of invoice</div>
+        <div class="small muted">Bill of lading <span class="mono">MAEU241188730</span></div>
+        <div class="small muted">Your reference <span class="mono">PO-88431</span></div>
+      </div>
+    </div>
+
+    <div class="scroll-x"><table class="tbl">
+      <thead><tr><th>Charge</th><th>Basis</th><th class="r">Qty</th><th class="r">Unit</th>
+        <th class="r">Amount</th><th class="r">VAT</th></tr></thead>
+      <tbody>${d.sections.map((sec) => `
+        <tr><td colspan="6" class="eyebrow" style="padding-top:11px">${sec.label}</td></tr>
+        ${sec.lines.map((l) => `<tr>
+          <td><span class="mono muted" style="font-size:10.5px">${l.code}</span>
+              <span class="p">${esc(l.desc)}</span>
+              <div style="margin-top:3px"><span class="tag ${PROV_TAG[l.prov]}">${PROV_LABEL[l.prov]}</span>
+              ${l.vendor ? `<span class="small muted" style="margin-left:6px">${esc(l.vendor)}</span>` : ""}</div></td>
+          <td class="muted">per ${l.basis}</td>
+          <td class="r tab muted">${l.qty}</td>
+          <td class="r tab muted">${money(l.unit, "ZAR")}</td>
+          <td class="r tab p">${money(l.sell, "ZAR")}</td>
+          <td class="r tab muted">${l.vatBps ? money(lineVat(l.sell, l.vatBps), "ZAR")
+            : `<span class="small">Zero-rated</span>`}</td></tr>`).join("")}
+        <tr><td colspan="4" class="r muted" style="font-size:11.5px">${sec.label} subtotal</td>
+            <td class="r tab p">${money(sec.sub, "ZAR")}</td>
+            <td class="r tab muted">${money(sec.vat, "ZAR")}</td></tr>`).join("")}
+      </tbody></table></div>
+
+    <div class="grid g-53" style="margin-top:16px">
+      <div>
+        <div class="eyebrow" style="margin-bottom:7px">How this invoice is made up</div>
+        ${split("Disbursements, recovered at cost", d.pass)}
+        ${split("Third-party services", d.marked)}
+        ${split("Our own services", d.own)}
+        <p class="small muted" style="margin:9px 0 0">
+          The split no forwarder invoice in the market carries. It is the answer to
+          &ldquo;what am I actually paying you for&rdquo;, printed rather than argued about.</p>
+      </div>
+      <div>
+        <div class="kv"><span class="k">Subtotal</span><span class="v">${money(d.sub, "ZAR")}</span></div>
+        <div class="kv"><span class="k">VAT @ ${(ISSUER.vatBps / 100).toFixed(0)}%</span><span class="v">${money(d.vat, "ZAR")}</span></div>
+        <div class="kv tot"><span class="k">Total due</span><span class="v accent">${money(d.total, "ZAR")}</span></div>
+        ${paid ? `<div class="kv"><span class="k">Paid</span><span class="v">− ${money(paid, "ZAR")}</span></div>
+          <div class="kv tot"><span class="k">Balance</span><span class="v">${money(d.total - paid, "ZAR")}</span></div>` : ""}
+        <div class="small muted" style="margin-top:11px">
+          ${esc(ISSUER.bank)} · <span class="mono">${ISSUER.acct}</span> ·
+          branch <span class="mono">${ISSUER.branch}</span> ·
+          <span class="mono">${ISSUER.swift}</span><br>
+          Payment reference <span class="mono">${esc(S.invoice.number)}</span></div>
+      </div>
+    </div>
+
+    <p class="small muted" style="margin:16px 0 0;padding-top:11px;border-top:1px dotted var(--hairline)">
+      This is a freight forwarder&rsquo;s invoice for transport and related services. It is not a
+      commercial invoice and does not state the value of the goods; it is not a bill of lading and
+      confers no title to the cargo.</p>`;
+}
+
+/* ================================================================= act 8 */
+/* The four-way match. Every rule below is one that a two-way match against the
+   quote total structurally cannot see. */
+const MATCH_SOURCES = [
+  { k: "CONTRACT", label: "Contract", sub: "The accepted quote's own lines" },
+  { k: "VENDOR_COST", label: "Vendor cost", sub: "Recorded buy, or a published index" },
+  { k: "SHIPMENT_DATA", label: "Shipment data", sub: "Containers, documents, weights" },
+  { k: "SERVICE_EVENTS", label: "Service events", sub: "Did the billed thing happen" },
+];
+
+function runAudit() {
+  const f = [];
+  // From the booking, not a constant — the whole point of matching against
+  // shipment data is that it is the shipment's data.
+  const containers = S.quote ? S.quote.qty : 1;
+  const documents = 1;
+  const seen = S.events.map((e) => e.type);
+
+  for (const l of S.charges) {
+    if (l.basis === "container" && l.qty !== containers) {
+      f.push({ sev: "WARN", code: "QUANTITY_VS_CONTAINERS", var: l.unit * (l.qty - containers),
+        msg: `${l.desc} is charged per container at quantity ${l.qty}, but this shipment moves ${containers} containers.`,
+        src: "SHIPMENT_DATA" });
+    }
+    if (l.basis === "document" && l.qty > documents) {
+      f.push({ sev: "WARN", code: "QUANTITY_VS_DOCUMENTS", var: l.unit * (l.qty - documents),
+        msg: `${l.desc} is charged for ${l.qty} documents; this shipment has ${documents}. Documentation fees are per bill of lading, not per container.`,
+        src: "SHIPMENT_DATA" });
+    }
+    if (l.contract != null && l.unit !== l.contract) {
+      f.push({ sev: l.unit > l.contract ? "CRITICAL" : "WARN", code: "CONTRACT_RATE_VARIANCE",
+        var: (l.unit - l.contract) * l.qty,
+        msg: `${l.desc} is billed at ${money(l.unit, "ZAR")} per ${l.basis} against a contracted ${money(l.contract, "ZAR")} (${(((l.unit - l.contract) / l.contract) * 100).toFixed(1)}%). Source: agency agreement, effective this quarter.`,
+        src: "CONTRACT" });
+    }
+    if (l.prov === "PASS_THROUGH" && l.buy != null && l.sell > l.buy) {
+      f.push({ sev: "CRITICAL", code: "MARGIN_ON_PASS_THROUGH", var: l.sell - l.buy,
+        msg: `${l.desc} is billed as a disbursement but carries ${money(l.sell - l.buy, "ZAR")} above the recorded cost. Either the margin is wrong or the line is mislabelled.`,
+        src: "VENDOR_COST" });
+    }
+    if (!(CODES[l.code] || CODES.MSC).tax && l.vatBps > 0) {
+      f.push({ sev: "CRITICAL", code: "VAT_ON_DISBURSEMENT", var: lineVat(l.sell, l.vatBps),
+        msg: `${l.desc} is outside the scope of VAT but is charged at ${(l.vatBps / 100).toFixed(0)}%. This overstates the invoice and the issuer's own VAT return together.`,
+        src: "CONTRACT" });
+    }
+    if (l.code === "DEM" && !seen.includes("container.discharged")) {
+      f.push({ sev: "CRITICAL", code: "SERVICE_NOT_EVIDENCED", var: l.sell,
+        msg: `${l.desc} bills for time after discharge, but no discharge has been recorded on this shipment.`,
+        src: "SERVICE_EVENTS" });
+    }
+  }
+
+  if (S.charges.some((l) => l.cat === "FUEL_SURCHARGE")) {
+    const t = S.charges.filter((l) => l.cat === "FUEL_SURCHARGE").reduce((a, l) => a + l.sell, 0);
+    f.push({ sev: "WARN", code: "FUEL_BENCHMARK_UNAVAILABLE", var: null,
+      msg: `${money(t, "ZAR")} of fuel surcharge could not be validated: no fuel index is configured. Bunker and jet-fuel indices are licensed external feeds — FUEL_INDEX_URL enables this check.`,
+      src: null });
+  }
+  if (S.charges.some((l) => l.code === "DEM")) {
+    f.push({ sev: "WARN", code: "DEMURRAGE_UNVERIFIABLE", var: null,
+      msg: "Demurrage cannot be recomputed: it needs the discharge and gate-out timestamps from the terminal and the free-time allowance on the bill of lading. TERMINAL_EVENTS_URL enables this check.",
+      src: null });
+  }
+
+  const order = { CRITICAL: 0, WARN: 1, INFO: 2 };
+  f.sort((a, b) => order[a.sev] - order[b.sev] || Math.abs(b.var || 0) - Math.abs(a.var || 0));
+
+  const depth = {
+    CONTRACT: !!S.quote,
+    VENDOR_COST: S.charges.some((l) => l.buy != null),
+    SHIPMENT_DATA: !!S.booked,
+    SERVICE_EVENTS: seen.length > 0,
+  };
+  return { findings: f, depth, matched: Object.values(depth).filter(Boolean).length };
+}
+
+function renderAudit() {
+  if (!S.charges.length && S.booked) accrueFor(LIFECYCLE[0], S.quote || priceQuote());
+  const a = S.audit;
+
+  $("#audit-sources").innerHTML = MATCH_SOURCES.map((m) => {
+    const on = a ? a.depth[m.k] : false;
+    return `<div class="tile ${a ? (on ? "good" : "") : ""}">
+      <div class="k">${m.label}</div>
+      <div class="v" style="font-size:14px">${a ? (on ? "Matched" : "No data") : "—"}</div>
+      <div class="s">${m.sub}</div></div>`;
+  }).join("");
+
+  const box = $("#audit-findings");
+  if (!a) {
+    box.innerHTML = `<p class="small muted" style="padding:14px 0">
+      Not matched yet. Run it <b>before</b> the invoice is paid — carriers and forwarders run
+      dispute windows measured in days, and a finding raised at month-end is a finding raised after
+      the window closed.</p>`;
+  } else {
+    const queryable = a.findings.reduce((t, x) => t + Math.max(0, x.var || 0), 0);
+    box.innerHTML =
+      `<p class="small" style="margin:6px 0 12px">
+         <b class="p">${a.findings.length} finding${a.findings.length === 1 ? "" : "s"}</b>
+         <span class="muted"> across ${S.charges.length} lines, matched against
+         ${a.matched} of 4 sources.</span>
+         ${queryable ? `<span style="color:var(--warning)"> ${money(queryable, "ZAR")} queryable.</span>` : ""}</p>` +
+      (a.matched < 4 ? `<div class="note" style="margin:0 0 11px">
+         Matched against ${a.matched} of 4 sources. The lines that depend on the missing ones have
+         not been validated, and are listed below rather than passed.</div>` : "") +
+      a.findings.map((x) => `<div class="evt" style="display:block;padding:9px 0">
+        <div class="row" style="gap:8px">
+          <span class="tag ${x.sev === "CRITICAL" ? "bad" : "warn"}"><i></i>${x.sev}</span>
+          <span class="mono muted" style="font-size:10.5px">${x.code}</span>
+          ${x.var ? `<span class="tab" style="margin-left:auto;color:${x.var > 0 ? "var(--warning)" : "var(--t2)"};font-weight:600">
+            ${x.var > 0 ? "+" : ""}${money(x.var, "ZAR")}</span>` : ""}
+        </div>
+        <p class="small" style="margin:5px 0 0;color:var(--t1)">${esc(x.msg)}</p></div>`).join("");
+  }
+
+  $("#audit-risk").innerHTML = ["BAF", "THC", "DOC", "DEM", "FRT"].map((c) => {
+    const d = CODES[c] || CODES.MSC;
+    const w = d.err === "HIGH" ? 100 : d.err === "MEDIUM" ? 55 : 18;
+    return `<div style="margin-bottom:9px">
+      <div class="row" style="justify-content:space-between;font-size:11.5px">
+        <span><span class="mono muted">${c}</span> <span class="p">${d.label}</span></span>
+        <span class="tag ${d.err === "HIGH" ? "bad" : d.err === "MEDIUM" ? "warn" : ""}">${d.err}</span></div>
+      <div class="meter" style="margin-top:5px"><i style="width:${w}%"></i></div></div>`;
+  }).join("");
+
+  // 3,000 containers a year through one port, at the variances this one invoice
+  // already shows. Nothing here is extrapolated from a number the demo invented.
+  const boxes = S.quote ? S.quote.qty : 1;
+  const perBox = (a ? a.findings.reduce((t, x) => t + Math.max(0, x.var || 0), 0) : 0) / boxes;
+  $("#audit-portfolio").innerHTML = `
+    <div class="kv"><span class="k">Queryable on this invoice</span><span class="v">${money(perBox * boxes, "ZAR")}</span></div>
+    <div class="kv"><span class="k">Per container</span><span class="v">${money(perBox, "ZAR")}</span></div>
+    <div class="kv tot"><span class="k">Across 3,000 containers a year</span>
+      <span class="v accent">${money(perBox * 3000, "ZAR")}</span></div>
+    <p class="small muted" style="margin:9px 0 0">
+      One lane, one port, the findings from a single invoice. Every one of them is individually
+      below a manual review threshold, which is exactly why they survive.</p>`;
+}
+
+$("#audit-run").addEventListener("click", () => {
+  if (!S.charges.length && S.booked) accrueFor(LIFECYCLE[0], S.quote || priceQuote());
+  S.audit = runAudit();
+  emit("invoice.audited", {
+    findings: S.audit.findings.length,
+    matchedSources: `${S.audit.matched}/4`,
+    queryable: money(S.audit.findings.reduce((t, x) => t + Math.max(0, x.var || 0), 0), "ZAR"),
+  }, { src: "audit", minutes: 5 });
+  renderAudit();
+});
+
+$("#audit-packet").addEventListener("click", () => {
+  if (!S.audit) S.audit = runAudit();
+  const claims = S.audit.findings.filter((x) => (x.var || 0) > 0);
+  const total = claims.reduce((t, x) => t + x.var, 0);
+
+  // Plain text on purpose: this gets pasted into an email, and the recipient is
+  // a person with an invoice in front of them, not a system.
+  const lines = [
+    `Query on invoice ${S.invoice ? S.invoice.number : ISSUER.prefix + "-2026-000001"}`,
+    "Shipment: FF-2026-00042",
+    "Transport document: MAEU241188730",
+    `Raised by: ${ISSUER.trading}`,
+    `Date: ${S.clock.toISOString().slice(0, 10)}`,
+    "Dispute window: 9 days remaining",
+    "",
+  ];
+
+  if (claims.length) {
+    lines.push(`The following ${claims.length} item(s) on this invoice are queried, totalling ${money(total, "ZAR")}:`, "");
+    claims.forEach((x, i) => {
+      lines.push(`${i + 1}. ${x.code}`);
+      lines.push(`   Queried: ${money(x.var, "ZAR")}`);
+      lines.push(`   Reason: ${x.msg}`);
+      lines.push("");
+    });
+  } else {
+    lines.push("No quantified overcharges were identified on this invoice.", "");
+  }
+
+  lines.push(
+    "Please provide the underlying tariff, index publication or terminal record supporting the",
+    "charges above, or issue a credit note for the queried amounts.",
+    "",
+    "This query is raised before payment and within the dispute window. Payment of the undisputed",
+    "balance is not withheld.",
+  );
+
+  $("#packet-panel").hidden = false;
+  $("#packet-body").textContent = lines.join("\n");
+  renderAudit();
+});
+
+/* ================================================================= act 9 */
+const INTEGRATIONS = [
+  { name: "SARS Customs EDI", domain: "Customs", live: false, prod: false,
+    keys: ["SARS_EDI_URL", "SARS_CLIENT_NUMBER", "SARS_CLIENT_CERT_PATH", "SARS_CLIENT_KEY_PATH"],
+    why: "Lodge declarations (CUSDEC) and receive releases and stops (CUSRES) on the same channel.",
+    accred: "The company must be registered with SARS with a customs client number, then apply for an EDI user profile and be issued a client certificate. A paper process measured in weeks — no code path shortens it.",
+    degrade: "Declarations are built, validated and stored complete. They stop at QUEUED and export for manual capture." },
+  { name: "SARS eFiling", domain: "Compliance", live: false, prod: false,
+    keys: ["SARS_EFILING_URL"],
+    why: "VAT201 returns and deferment statements, so output VAT and recovered import VAT reconcile against what was declared.",
+    accred: "An eFiling profile with the ISV access SARS grants registered software providers.",
+    degrade: "VAT positions computed in the console for manual capture." },
+  { name: "Bunker / jet fuel index", domain: "Billing audit", live: false, prod: false,
+    keys: ["FUEL_INDEX_URL"],
+    why: "Validate BAF, EBS and CAF against the index they claim to track — the highest-error category on the document.",
+    accred: "A commercial data licence. Platts and Argus assessments are redistributable only under subscription.",
+    degrade: "Fuel lines reported unvalidated on the audit, with the unchecked total stated." },
+  { name: "Terminal gate events", domain: "Billing audit", live: false, prod: false,
+    keys: ["TERMINAL_EVENTS_URL"],
+    why: "Gate-in, gate-out and empty-return timestamps, so demurrage is recomputed from free time instead of taken on trust.",
+    accred: "Per-terminal or per-carrier data agreement.",
+    degrade: "Demurrage flagged unverifiable rather than silently accepted." },
+  { name: "Denied-party screening", domain: "Screening", live: true, prod: true,
+    keys: ["YENTE_URL"], why: "Every party screened against consolidated sanctions lists at creation and again at booking.",
+    accred: null, degrade: "Parties recorded UNSCREENED and no compliance hold raised." },
+  { name: "Carrier track & trace", domain: "Visibility", live: true, prod: true,
+    keys: ["INGEST_API_KEY"], why: "Milestones over DCSA, EDIFACT IFTSTA and Traccar. All three adapters already built.",
+    accred: "Per-carrier credentials through each carrier's developer programme.",
+    degrade: "Milestones recorded by hand from the ops screen." },
+];
+
+function renderCompliance() {
+  const live = INTEGRATIONS.filter((i) => i.live).length;
+  const accred = INTEGRATIONS.filter((i) => i.accred && !i.live).length;
+  $("#int-tiles").innerHTML = `
+    <div class="tile"><div class="k">External systems</div><div class="v">11</div><div class="s">Wired in the product</div></div>
+    <div class="tile good"><div class="k">Live here</div><div class="v">${live}</div><div class="s">Configured in this environment</div></div>
+    <div class="tile warn"><div class="k">Need accreditation</div><div class="v">${accred}</div><div class="s">Paperwork, not code</div></div>
+    <div class="tile accent"><div class="k">Hard dependencies</div><div class="v">0</div><div class="s">Every one degrades to a stated partial</div></div>`;
+
+  $("#int-list").innerHTML = INTEGRATIONS.map((i) => `
+    <div style="padding:11px 0;border-bottom:1px solid var(--hairline)">
+      <div class="row" style="gap:8px">
+        <span class="p" style="font-weight:500">${esc(i.name)}</span>
+        <span class="tag ${i.live ? "good" : ""}"><i></i>${i.live ? "Live" : "Not configured"}</span>
+        <span class="small muted" style="margin-left:auto">${i.domain}</span>
+      </div>
+      <p class="small muted" style="margin:5px 0 0">${esc(i.why)}</p>
+      ${!i.live ? `<p class="small" style="margin:5px 0 0;color:var(--t2)"><b>Without it:</b> ${esc(i.degrade)}</p>` : ""}
+      ${i.accred && !i.live ? `<p class="small" style="margin:5px 0 0;padding:6px 9px;border:1px dotted var(--hairline);
+          border-radius:4px;color:var(--warning)"><b>Accreditation required.</b> ${esc(i.accred)}</p>` : ""}
+      <div class="row" style="gap:5px;margin-top:6px">${i.keys.map((k) =>
+        `<span class="mono" style="font-size:10px;padding:2px 6px;border-radius:3px;border:1px solid ${
+          i.live ? "color-mix(in srgb, var(--success) 34%, transparent);color:var(--success)"
+                 : "var(--hairline);color:var(--t3)"}">${k}</span>`).join("")}</div>
+    </div>`).join("");
+
+  // Rendered as key/value rows rather than the event-log layout used
+  // elsewhere: this panel is a third of a column wide, and the three-column
+  // event row wraps into an unreadable stack at that width.
+  $("#filing-box").innerHTML = `
+    <div class="kv"><span class="k">Filing</span><span class="v">SARS_CUSDEC</span></div>
+    <div class="kv"><span class="k">State</span><span class="v" style="color:var(--warning)">QUEUED</span></div>
+    <div class="kv"><span class="k">Tariff lines validated</span><span class="v">4</span></div>
+    <div class="kv"><span class="k">Duty &amp; VAT computed</span><span class="v">${money(customsTotals().total, "ZAR")}</span></div>
+    <div class="kv"><span class="k">Tariff book</span><span class="v">SARS Schedule 1</span></div>
+    <p class="small muted" style="margin:10px 0 0">
+      Not transmitted: <span class="mono">SARS_EDI_URL</span>,
+      <span class="mono">SARS_CLIENT_NUMBER</span> and
+      <span class="mono">SARS_CLIENT_CERT_PATH</span> are unset. The submission carries an
+      idempotency key, so the retry that follows accreditation never lodges a second
+      declaration — a duplicate customs entry has to be unwound with SARS by hand.</p>`;
+}
+
+
+$("#adv-btn").addEventListener("click", () => {
+  if (!S.booked || S.step >= LIFECYCLE.length - 1) return;
+  S.step += 1;
+  const m = LIFECYCLE[S.step];
+  const q = S.quote || priceQuote();
+  emit(m.type, { at: m.at, status: m.status }, { src: m.src, minutes: 180 });
+  accrueFor(m, q);
+  if (m.type === "entry.submitted") S.customs.status = "SUBMITTED";
+  if (m.type === "entry.released") S.customs.status = "RELEASED";
+  renderTrack();
+  renderStatusbar();
+});
+
+$("#roll-btn").addEventListener("click", () => {
+  S.rolled = true;
+  emit("booking.rolled", { reason: "Carrier omitted the port call", etaShift: "+7d" }, { src: "DCSA", minutes: 30 });
+  emit("shipment.exception_raised", { code: "BOOKING_ROLLED" }, { src: "projector", minutes: 0 });
+  renderTrack();
+});
+
+$("#reset-btn").addEventListener("click", () => {
+  S.step = S.booked ? 0 : -1;
+  S.rolled = false;
+  S.charges = [];
+  S.invoice = null;
+  S.payments = [];
+  S.audit = null;
+  S.feeCents = 0;
+  S.customs = { status: "DRAFT", confirmed: false };
+  const q = S.quote || priceQuote();
+  if (S.booked) accrueFor(LIFECYCLE[0], q);
+  renderTrack();
+  renderStatusbar();
+});
+
+/* ================================================================= act 6 */
+function dutyLine(l) {
+  const duty = roundHalfUp(l.value * l.rate / 10000);
+  const uplift = l.sacu ? 0 : roundHalfUp(l.value * ATV_UPLIFT_BPS / 10000);
+  const atv = l.value + uplift + duty;
+  const vat = roundHalfUp(atv * VAT_RATE_BPS / 10000);
+  return { duty, uplift, atv, vat };
+}
+function customsTotals() {
+  const t = CUSTOMS_LINES.reduce((a, l) => {
+    const d = dutyLine(l);
+    a.value += l.value; a.duty += d.duty; a.vat += d.vat; a.atv += d.atv;
+    return a;
+  }, { value: 0, duty: 0, vat: 0, atv: 0 });
+  t.total = t.duty + t.vat;
+  return t;
+}
+
+const ENTRY_STATES = ["DRAFT", "PREPARED", "SUBMITTED", "RELEASED"];
+
+function renderCustoms() {
+  $("#cust-ref").textContent = shipmentRef() ? `Entry for ${shipmentRef()}` : "Entry — book a shipment first";
+  const t = customsTotals();
+
+  $("#cust-lines").innerHTML =
+    `<thead><tr><th>Description</th><th>HS</th><th class="r">Customs value</th><th class="r">Duty</th><th class="r">VAT</th><th>Classification</th></tr></thead><tbody>` +
+    CUSTOMS_LINES.map((l) => {
+      const d = dutyLine(l);
+      const low = l.conf < 0.85;
+      return `<tr>
+        <td class="p">${esc(l.desc)}</td>
+        <td class="mono">${l.hs}</td>
+        <td class="r tab">${money(l.value, "ZAR")}</td>
+        <td class="r tab">${money(d.duty, "ZAR")} <span class="muted" style="font-size:10.5px">${pct(l.rate)}</span></td>
+        <td class="r tab">${money(d.vat, "ZAR")}</td>
+        <td>${S.customs.confirmed
+          ? `<span class="tag good"><i></i>Confirmed</span>`
+          : low ? `<span class="tag warn"><i></i>${(l.conf * 100).toFixed(0)}% — needs a human</span>`
+                : `<span class="tag accent"><i></i>${(l.conf * 100).toFixed(0)}% auto</span>`}</td>
+      </tr>`;
+    }).join("") + `</tbody>`;
+
+  $("#cust-totals").innerHTML = `
+    <div class="kv"><span class="k">Customs value</span><span class="v">${money(t.value, "ZAR")}</span></div>
+    <div class="kv"><span class="k">Duties</span><span class="v">${money(t.duty, "ZAR")}</span></div>
+    <div class="kv"><span class="k">Import VAT</span><span class="v">${money(t.vat, "ZAR")}</span></div>
+    <div class="kv tot"><span class="k">Payable to SARS</span><span class="v accent">${money(t.total, "ZAR")}</span></div>`;
+
+  const l0 = CUSTOMS_LINES[0], d0 = dutyLine(l0);
+  $("#cust-math").innerHTML = `
+    <p class="small muted" style="margin:0 0 9px">Worked on line 1 — <span class="mono">${l0.hs}</span>, ${esc(l0.desc)}.</p>
+    <div class="kv"><span class="k">Customs value</span><span class="v">${money(l0.value, "ZAR")}</span></div>
+    <div class="kv"><span class="k">Duty @ ${pct(l0.rate)}</span><span class="v">${money(d0.duty, "ZAR")}</span></div>
+    <div class="kv"><span class="k">10% upliftment (non-SACU)</span><span class="v">${money(d0.uplift, "ZAR")}</span></div>
+    <div class="kv"><span class="k">Added Tax Value</span><span class="v">${money(d0.atv, "ZAR")}</span></div>
+    <div class="kv tot"><span class="k">VAT @ 15% of ATV</span><span class="v good">${money(d0.vat, "ZAR")}</span></div>
+    <p class="small muted" style="margin:10px 0 0">
+      Integer cents, half-up rounding at each statutory step — mirroring SARS practice.
+      Compute VAT on the invoice value instead of the ATV and every entry is wrong by
+      the duty and the upliftment.
+    </p>`;
+
+  const at = ENTRY_STATES.indexOf(S.customs.status);
+  $("#cust-states").innerHTML = ENTRY_STATES.map((s, i) =>
+    `<span class="tag ${i < at ? "accent" : i === at ? "good" : ""}">${i <= at ? "<i></i>" : ""}${s}</span>`).join("");
+
+  const stTag = $("#cust-status");
+  stTag.className = "tag " + (S.customs.status === "RELEASED" ? "good" : S.customs.status === "SUBMITTED" ? "warn" : "");
+  stTag.innerHTML = `<i></i>${S.customs.status}`;
+
+  $("#cust-confirm").disabled = S.customs.confirmed;
+  $("#cust-submit").disabled = !S.customs.confirmed || S.customs.status !== "PREPARED";
+  $("#cust-release").disabled = S.customs.status !== "SUBMITTED";
+  $("#cust-hint").textContent = !S.customs.confirmed
+    ? "Two of three lines came back below the 0.85 confidence threshold. The entry cannot be submitted until a human confirms them."
+    : S.customs.status === "PREPARED" ? "Lines confirmed. The entry is ready to file."
+    : S.customs.status === "SUBMITTED" ? "Filed with SARS. Awaiting an outcome."
+    : "Released. Duty and VAT are disbursed and become a financeable position.";
+}
+
+$("#cust-confirm").addEventListener("click", () => {
+  S.customs.confirmed = true;
+  S.customs.status = "PREPARED";
+  emit("entry.prepared", { lines: CUSTOMS_LINES.length, confirmedBy: "Thandi Mokoena" }, { minutes: 25 });
+  renderCustoms();
+});
+$("#cust-submit").addEventListener("click", () => {
+  S.customs.status = "SUBMITTED";
+  emit("entry.submitted", { entryNumber: "CPT-2026-0041", payable: money(customsTotals().total, "ZAR") }, { minutes: 15 });
+  renderCustoms();
+});
+$("#cust-release").addEventListener("click", () => {
+  S.customs.status = "RELEASED";
+  emit("entry.released", { entryNumber: "CPT-2026-0041" }, { src: "SARS", minutes: 400 });
+  // Same accrual the lifecycle consumer writes, so a release reached from this
+  // screen produces charges with the same taxonomy as one reached from Act 5.
+  // Two shapes of the same line is how the audit ends up reading undefined.
+  accrueFor({ type: "entry.released" }, S.quote || priceQuote());
+  renderCustoms();
+});
+
+/* ================================================================= act 7 */
+function renderMoney() {
+  if (!S.charges.length && S.booked) accrueFor(LIFECYCLE[0], S.quote || priceQuote());
+
+  $("#charge-tbl").innerHTML =
+    `<thead><tr><th>Kind</th><th>Description</th><th>Accrued on</th><th class="r">Buy</th><th class="r">Sell</th></tr></thead><tbody>` +
+    (S.charges.length ? S.charges.map((c) => `<tr>
+      <td><span class="tag ${c.kind === "FEE" ? "rails" : ""}">${c.kind}</span></td>
+      <td class="p">${esc(c.desc)}</td>
+      <td class="mono" style="font-size:10.5px">${c.on}</td>
+      <td class="r tab muted">${money(c.buy, c.ccy)}</td>
+      <td class="r tab p">${money(c.sell, c.ccy)}</td></tr>`).join("")
+      : `<tr><td colspan="5" class="center muted" style="padding:22px">Nothing accrued yet — book and move a shipment first.</td></tr>`) +
+    `</tbody>`;
+
+  $("#inv-issue").disabled = !S.charges.length || !!S.invoice;
+  $("#inv-issue").textContent = S.invoice ? "Invoiced ✓" : "Issue invoice";
+
+  const sellTotal = S.charges.reduce((s, c) => s + c.sell, 0);
+  const buyTotal = S.charges.reduce((s, c) => s + c.buy, 0);
+  const margin = sellTotal - buyTotal;
+  // Duty and VAT are billed at cost and remitted to SARS. Including them in
+  // the denominator makes the margin ratio meaningless — R800 on R495k reads
+  // as a failing business when it is really R800 on R1,750 of actual service.
+  const revenue = S.charges.filter((c) => c.kind !== "DISBURSEMENT").reduce((s, c) => s + c.sell, 0);
+  $("#pnl").innerHTML = `
+    <div class="kv"><span class="k">Sell (billed to customer)</span><span class="v">${money(sellTotal, "ZAR")}</span></div>
+    <div class="kv"><span class="k">Buy (carriers, SARS, hauliers)</span><span class="v muted">${money(buyTotal, "ZAR")}</span></div>
+    <div class="kv tot"><span class="k">Gross margin</span><span class="v accent">${money(margin, "ZAR")}</span></div>
+    <div style="margin-top:11px" class="meter"><i style="width:${revenue ? Math.min(100, margin / revenue * 100).toFixed(1) : 0}%"></i></div>
+    <p class="small muted" style="margin:7px 0 0">
+      ${revenue ? (margin / revenue * 100).toFixed(1) : "0.0"}% margin on ${money(revenue, "ZAR")} of service revenue.
+      Duty and VAT are billed at cost and remitted, so they are excluded.</p>`;
+
+  const paid = S.payments.reduce((s, p) => s + p.amt, 0);
+  if (S.invoice) {
+    $("#inv-panel").hidden = false;
+    $("#inv-num").textContent = S.invoice.number;
+    const outstanding = S.invoice.total - paid;
+    const status = paid >= S.invoice.total ? "PAID" : paid > 0 ? "PART_PAID" : "ISSUED";
+    const tag = $("#inv-status");
+    tag.className = "tag " + (status === "PAID" ? "good" : status === "PART_PAID" ? "warn" : "accent");
+    tag.innerHTML = `<i></i>${status.replace("_", " ")}`;
+
+    $("#pay-tbl").innerHTML =
+      `<thead><tr><th>Reference</th><th>Received</th><th class="r">Amount</th></tr></thead><tbody>` +
+      (S.payments.length ? S.payments.map((p) => `<tr class="${p.fresh ? "new-row" : ""}">
+        <td class="mono p">${esc(p.ref)}</td><td>${p.when}</td>
+        <td class="r tab p">${money(p.amt, "ZAR")}</td></tr>`).join("")
+        : `<tr><td colspan="3" class="center muted" style="padding:16px">No payments recorded.</td></tr>`) +
+      `<tr><td colspan="2" class="p">Invoice total</td><td class="r tab p">${money(S.invoice.total, "ZAR")}</td></tr>
+       <tr><td colspan="2" class="p">Outstanding</td><td class="r tab ${outstanding > 0 ? "p" : "muted"}">${money(Math.max(outstanding, 0), "ZAR")}</td></tr></tbody>`;
+
+    if (!$("#pay-amt").dataset.touched) $("#pay-amt").value = (Math.max(outstanding, 0) / 100).toFixed(2);
+  }
+
+  $("#finance-views").innerHTML = `
+    <div class="kv"><span class="k">Duty outlay, financeable</span><span class="v">${money(S.customs.status === "RELEASED" ? customsTotals().total : 0, "ZAR")}</span></div>
+    <div class="kv"><span class="k">Receivables on the factoring clock</span><span class="v">${money(S.invoice ? Math.max(S.invoice.total - paid, 0) : 0, "ZAR")}</span></div>
+    <div class="kv"><span class="k">Ledger events emitted</span><span class="v">${S.events.filter((e) => /charge|invoice|payment|entry/.test(e.type)).length}</span></div>`;
+
+  renderDoc();
+}
+
+$("#inv-issue").addEventListener("click", () => {
+  if (S.invoice || !S.charges.length) return;
+  const total = invoiceDoc().total;
+  S.invoice = { number: `${ISSUER.prefix}-2026-000001`, total: invoiceDoc().total };
+  emit("invoice.issued", { invoiceId: S.invoice.number, total: money(total, "ZAR"), terms: "30 days" }, { minutes: 60 });
+  $("#pay-amt").dataset.touched = "";
+  renderMoney();
+});
+
+$("#pay-amt").addEventListener("input", () => ($("#pay-amt").dataset.touched = "1"));
+
+$("#pay-btn").addEventListener("click", () => {
+  const msg = $("#pay-msg");
+  if (!S.invoice) return;
+  const ref = $("#pay-ref").value.trim();
+  const amt = Math.round(Number($("#pay-amt").value || 0) * 100);
+  if (!ref) {
+    msg.style.color = "var(--critical)";
+    msg.textContent = "A payment reference is required — it is what prevents double-crediting.";
+    return;
+  }
+  if (amt <= 0) {
+    msg.style.color = "var(--critical)";
+    msg.textContent = "Enter the amount received.";
+    return;
+  }
+  if (S.payments.some((p) => p.ref === ref)) {
+    msg.style.color = "var(--warning)";
+    msg.textContent = `Reference ${ref} was already applied to this invoice — nothing changed, and no second event was emitted.`;
+    renderMoney();
+    return;
+  }
+  S.payments.forEach((p) => (p.fresh = false));
+  S.payments.push({ ref, amt, when: dayStamp(S.clock), fresh: true });
+  emit("payment.received", { invoiceId: S.invoice.number, amount: money(amt, "ZAR"), paymentRef: ref }, { minutes: 90 });
+  const paid = S.payments.reduce((s, p) => s + p.amt, 0);
+  const out = S.invoice.total - paid;
+  msg.style.color = out > 0 ? "var(--t2)" : "var(--success)";
+  msg.textContent = out > 0
+    ? `Recorded. ${money(out, "ZAR")} still outstanding.`
+    : out < 0 ? `Recorded — overpaid by ${money(-out, "ZAR")}, which is money to refund, not revenue.`
+    : "Recorded. Invoice settled in full.";
+  $("#pay-amt").dataset.touched = "";
+  renderMoney();
+});
+
+/* ================================================================ act 10 */
+const CUSTOMER_WORDS = {
+  "shipment.booked": "Booking confirmed",
+  "container.gated_in": "Container received at the origin terminal",
+  "container.loaded": "Container loaded on the vessel",
+  "vessel.departed": "Vessel departed",
+  "vessel.arrived": "Vessel arrived at the destination port",
+  "container.discharged": "Container discharged",
+  "entry.submitted": "Customs entry submitted",
+  "entry.released": "Cleared by customs",
+  "container.gated_out": "Out for delivery",
+  "pod.confirmed": "Delivered",
+  "invoice.issued": "Invoice issued",
+  "payment.received": "Payment received",
+};
+
+function renderPortal() {
+  const on = S.portalView;
+  $("#portal-toggle").textContent = on ? "Back to operator console" : "View as Ubuntu Trading";
+  $("#portal-toggle").className = "btn " + (on ? "ghost" : "primary");
+  $("#portal-note").textContent = on ? "Currently: shipper portal · CUSTOMER tenant" : "Currently: operator console · OPERATOR tenant";
+  $("#portal-eyebrow").textContent = on ? "Your cargo" : "Operator view";
+  $("#portal-title").textContent = on ? "My shipments" : "Shipments";
+
+  const rows = S.booked
+    ? [{ ref: shipmentRef(), o: (S.quote || priceQuote()).card.origin, d: (S.quote || priceQuote()).card.destination, st: shipmentStatus() }]
+    : [];
+  const extra = on ? "" : `<th class="r">Buy</th><th class="r">Margin</th>`;
+  const q = S.quote || priceQuote();
+
+  $("#portal-tbl").innerHTML =
+    `<thead><tr><th>Reference</th><th>Route</th><th>Status</th><th>Latest milestone</th>${extra}</tr></thead><tbody>` +
+    (rows.length ? rows.map((r) => `<tr>
+      <td class="mono p">${r.ref}</td>
+      <td><span class="mono p">${r.o}</span> → <span class="mono p">${r.d}</span></td>
+      <td><span class="tag ${STATUS_TONE[r.st] || ""}"><i></i>${r.st.replace(/_/g, " ")}</span></td>
+      <td>${S.step >= 0 ? (on ? CUSTOMER_WORDS[LIFECYCLE[S.step].type] : LIFECYCLE[S.step].type) : "—"}</td>
+      ${on ? "" : `<td class="r tab muted">${money(q.buyZar, "ZAR")}</td><td class="r tab accent p">${money(q.marginZar, "ZAR")}</td>`}
+    </tr>`).join("")
+      : `<tr><td colspan="6" class="center muted" style="padding:22px">No shipments yet.</td></tr>`) +
+    `</tbody>`;
+
+  const hidden = [
+    { t: "charge.accrued", d: "Cost build-up per leg — the forwarder's business with its carriers" },
+    { t: "quote.issued", d: "Buy price and the margin applied to it" },
+    { t: "Buy / margin columns", d: "Present for the operator, absent from the portal response entirely" },
+    { t: "Other customers' cargo", d: "Scoped out by linked party, not filtered in the browser" },
+  ];
+  $("#portal-filter").innerHTML = hidden.map((h) =>
+    `<div class="kv"><span class="k"><span class="mono" style="color:var(--t1)">${h.t}</span><br><span style="font-size:11.5px">${h.d}</span></span>
+      <span class="v ${on ? "" : "accent"}">${on ? "withheld" : "visible"}</span></div>`).join("");
+}
+
+$("#portal-toggle").addEventListener("click", () => {
+  S.portalView = !S.portalView;
+  if (S.portalView) emit("session.switched", { tenant: "Ubuntu Trading (Pty) Ltd", type: "CUSTOMER" }, { minutes: 2 });
+  renderPortal();
+});
+
+/* ================================================================= act 9 */
+function renderNetwork() {
+  const totalShip = S.partners.reduce((s, p) => s + p.shipments, 0);
+  const avgFreight = 4_200_00; // ZAR cents, indicative freight sell per shipment
+  const feeRun = S.partners.reduce((s, p) => s + roundHalfUp(p.shipments * avgFreight * p.feeBps / 10000), 0);
+
+  $("#net-tiles").innerHTML = [
+    { k: "Partner agents", v: S.partners.length, cls: "rails" },
+    { k: "Shipments on our rails", v: totalShip.toLocaleString("en-US"), cls: "" },
+    { k: "Platform fees to date", v: money(feeRun, "ZAR"), cls: "rails" },
+    { k: "Our own operational risk", v: "None", cls: "good" },
+  ].map((t) => `<div class="tile ${t.cls}"><div class="k">${t.k}</div><div class="v" style="font-size:${String(t.v).length > 9 ? 19 : 25}px">${t.v}</div></div>`).join("");
+
+  $("#net-tbl").innerHTML =
+    `<thead><tr><th>Partner</th><th>Region</th><th class="r">Shipments</th><th class="r">Fee rate</th><th class="r">Fees accrued</th><th>Since</th></tr></thead><tbody>` +
+    S.partners.map((p) => `<tr${p.fresh ? ' class="new-row"' : ""}>
+      <td class="p">${esc(p.name)}</td><td>${esc(p.region)}</td>
+      <td class="r tab">${p.shipments}</td>
+      <td class="r tab">${pct(p.feeBps)}</td>
+      <td class="r tab p" style="color:var(--rails)">${money(roundHalfUp(p.shipments * avgFreight * p.feeBps / 10000), "ZAR")}</td>
+      <td class="mono" style="font-size:10.5px">${p.since}</td></tr>`).join("") + `</tbody>`;
+
+  $("#net-econ").innerHTML = `
+    <div class="kv"><span class="k">Avg. freight sell per shipment</span><span class="v">${money(avgFreight, "ZAR")}</span></div>
+    <div class="kv"><span class="k">Platform fee</span><span class="v rails">500 bps</span></div>
+    <div class="kv"><span class="k">Fee per shipment</span><span class="v rails">${money(roundHalfUp(avgFreight * 500 / 10000), "ZAR")}</span></div>
+    <div class="kv"><span class="k">Marginal cost to serve</span><span class="v good">≈ 0</span></div>
+    <div class="kv tot"><span class="k">Run rate at 1 000 shipments/mo</span><span class="v rails">${money(roundHalfUp(1000 * avgFreight * 500 / 10000), "ZAR")}<span class="muted" style="font-weight:400;font-size:11px"> / mo</span></span></div>
+    <div style="margin-top:11px" class="meter rails"><i style="width:${Math.min(100, totalShip / 1000 * 100).toFixed(1)}%"></i></div>
+    <p class="small muted" style="margin:7px 0 0">${totalShip} of 1 000 shipments/month on the rails today.</p>`;
+
+  drawMap($("#net-map"), [
+    { origin: "CNSHA", destination: "ZADUR", value: 9, tone: "rails" },
+    { origin: "DEHAM", destination: "ZADUR", value: 5, tone: "rails" },
+    { origin: "ZADUR", destination: "ZAJNB", value: 8, tone: "rails" },
+    { origin: "ZACPT", destination: "NAWVB", value: 4, tone: "rails" },
+    { origin: "ZAJNB", destination: "ZWHRE", value: 5, tone: "rails" },
+    { origin: "ZAJNB", destination: "ZAMSU", value: 3, tone: "rails" },
+  ], { aspect: 2.5, pad: 200 });
+}
+
+$("#net-ship").addEventListener("click", () => {
+  const p = S.partners[0];
+  const freightSell = 4_200_00;
+  const fee = roundHalfUp(freightSell * p.feeBps / 10000);
+  p.shipments += 1;
+  S.feeCents += fee;
+  emit("vessel.departed", { tenant: p.name, freightSell: money(freightSell, "ZAR") }, { rails: true, src: "DCSA", minutes: 20 });
+  emit("charge.accrued", { kind: "FEE", tenant: p.name, amount: money(fee, "ZAR"), rate: "500 bps" }, { rails: true, src: "billing-accrual", minutes: 0 });
+  renderNetwork();
+  renderStatusbar();
+});
+
+$("#net-add").addEventListener("click", () => {
+  const candidates = [
+    { name: "Maputo Corridor Clearing", region: "Mozambique", shipments: 0, feeBps: 500 },
+    { name: "Gauteng Air Freight Co.", region: "OR Tambo", shipments: 0, feeBps: 550 },
+    { name: "Copperbelt Transit", region: "Zambia", shipments: 0, feeBps: 600 },
+  ];
+  const next = candidates[S.partners.length - PARTNERS.length];
+  if (!next) return;
+  S.partners.forEach((p) => (p.fresh = false));
+  S.partners.push({ ...next, since: "2026-07", fresh: true });
+  emit("tenant.partner_onboarded", { name: next.name, feeBps: next.feeBps }, { rails: true, minutes: 5 });
+  renderNetwork();
+  if (S.partners.length - PARTNERS.length >= candidates.length) $("#net-add").disabled = true;
+});
+
+/* ================================================================ act 12 */
+function renderArch() {
+  $("#arch-nodes").innerHTML = [
+    { t: "apps/web", d: "Next.js 15 console + shipper portal. OIDC client, encrypted session, middleware routes by tenant type." },
+    { t: "apps/api", d: "NestJS. Quoting, booking, customs, billing, portal. Every query carries a tenant predicate.", core: true },
+    { t: "apps/worker", d: "Temporal. Timers that fire when a milestone does not arrive." },
+    { t: "packages/events", d: "Versioned catalogue, Zod-validated. The contract between everything.", core: true },
+    { t: "packages/db", d: "Drizzle schema, one migration path. Transactional outbox lives here." },
+    { t: "packages/ontology-bridge", d: "Maps freight events to the revenue ontology the finance product reads." },
+    { t: "billing/charge-codes", d: "The canonical taxonomy. Vendor dialects collapse onto it before anything is compared or priced.", core: true },
+    { t: "billing/invoice-audit", d: "The four-way match. Pure — no clock, no database — so a finding is re-derivable in a dispute a year later.", core: true },
+    { t: "integrations/*", d: "SARS EDI, fuel index, terminal gate events. Config-gated, each degrading to a stated partial." },
+    { t: "Postgres 16", d: "System of record. Events, projections and the outbox in one transaction." },
+    { t: "Redpanda", d: "Event bus. The relay ships the outbox and stamps published_at." },
+    { t: "Keycloak", d: "OIDC. tenant_id on the access token; realm roles gate writes." },
+    { t: "yente", d: "Sanctions screening on party create and on booking." },
+  ].map((n) => `<div class="node${n.core ? " core" : ""}"><div class="nt">${n.t}</div><div class="nd">${n.d}</div></div>`).join("");
+
+  const EVENTS = ["quote.issued", "quote.accepted", "shipment.booked", "booking.rolled", "container.gated_in",
+    "container.loaded", "vessel.departed", "vessel.position_reported", "vessel.arrived", "container.discharged",
+    "entry.prepared", "entry.submitted", "entry.queried", "entry.released", "entry.stopped", "container.gated_out",
+    "pod.confirmed", "charge.accrued", "invoice.issued", "payment.received", "document.uploaded",
+    "document.extracted", "document.approved", "party.screened", "compliance.hold_placed",
+    "shipment.exception_raised", "shipment.exception_cleared", "road.position_reported",
+    "invoice.audited", "filing.queued", "filing.submitted"];
+  $("#arch-events").innerHTML = EVENTS.map((e) =>
+    `<span class="tag mono${S.events.some((x) => x.type === e) ? " accent" : ""}">${e}</span>`).join("");
+
+  $("#arch-tests").innerHTML = [
+    ["216", "unit tests", "API, web, packages"],
+    ["56", "integration tests", "against a real Postgres"],
+    ["6", "mutation checks", "isolation proven non-vacuous"],
+    ["4", "CI gates", "lint → typecheck → build → test"],
+  ].map(([n, t, d]) => `<div class="kv"><span class="k"><b style="color:var(--t1)">${n}</b> ${t}<br><span style="font-size:11px" class="muted">${d}</span></span></div>`).join("");
+
+  $("#arch-gaps").innerHTML = [
+    "Keycloak realm, TLS termination and secrets management are operator steps, not code — documented in LAUNCH.md rather than pretended away.",
+    "The SARS tariff book is a ~90-heading reference extract, not the full gazetted Schedule 1. A CSV loader exists so the real schedule drops in without a code change.",
+    "The AIS listener's parsing is unit-tested; the live WebSocket connection is not, because that needs a real key and open egress.",
+    "Terraform for AWS is written and formats clean, but has never been applied against a real account.",
+    "No external error tracking yet — the global filter logs everything server-side, but someone has to be watching.",
+  ].map((g) => `<div class="evt"><span class="ts">honest</span><span class="ty">gap</span><span class="pl">${esc(g)}</span></div>`).join("");
+}
+
+/* ================================================================ act 11 */
+function renderClose() {
+  const q = S.quote || priceQuote();
+  const sell = S.charges.reduce((s, c) => s + (c.kind === "FEE" ? 0 : c.sell), 0) || q.sellZar;
+  const buy = S.charges.reduce((s, c) => s + c.buy, 0) || q.buyZar;
+  const m1 = freightMarginCents() || (sell - buy);
+  const avgFreight = 4_200_00;
+  const feeRun = S.partners.reduce((s, p) => s + roundHalfUp(p.shipments * avgFreight * p.feeBps / 10000), 0);
+
+  $("#close-m1").textContent = money(m1, "ZAR");
+  $("#close-m1-detail").innerHTML = `
+    <div class="kv"><span class="k">Billed to customer</span><span class="v">${money(sell, "ZAR")}</span></div>
+    <div class="kv"><span class="k">Paid to carriers &amp; SARS</span><span class="v muted">${money(buy, "ZAR")}</span></div>
+    <div class="kv"><span class="k">Shipments needed for R1m/yr</span><span class="v">${m1 > 0 ? Math.ceil(100000000 / m1).toLocaleString("en-US") : "—"}</span></div>`;
+
+  $("#close-m2").textContent = money(feeRun, "ZAR");
+  $("#close-m2-detail").innerHTML = `
+    <div class="kv"><span class="k">Partners live</span><span class="v rails">${S.partners.length}</span></div>
+    <div class="kv"><span class="k">Fee per shipment</span><span class="v rails">${money(roundHalfUp(avgFreight * 500 / 10000), "ZAR")}</span></div>
+    <div class="kv"><span class="k">Partners needed for R1m/yr</span><span class="v rails">${Math.ceil(100000000 / (12 * 100 * roundHalfUp(avgFreight * 500 / 10000)))}<span class="muted" style="font-weight:400;font-size:11px"> at 100 shipments/mo each</span></span></div>`;
+
+  $("#close-use").innerHTML = [
+    { t: "Corridor coverage", d: "Rate cards, customs expertise and carrier relationships on the corridors we do not yet price. Every corridor added is a corridor every partner can sell." },
+    { t: "Partner onboarding", d: "The rails business grows one forwarder at a time. Onboarding is currently a founder doing it personally; it needs to become a product." },
+    { t: "Regulatory surface", d: "SARS EDI accreditation, the full gazetted tariff schedule, and the customs-authority relationships that make the corridor dataset saleable." },
+  ].map((u) => `<div class="node"><div class="nt">${u.t}</div><div class="nd">${u.d}</div></div>`).join("");
+
+  $("#close-tiles").innerHTML = [
+    { k: "Events written", v: S.events.length },
+    { k: "Shipment status", v: shipmentStatus() ? shipmentStatus().replace(/_/g, " ") : "—" },
+    { k: "Freight margin", v: money(m1, "ZAR"), cls: "accent" },
+    { k: "Platform fees", v: money(feeRun, "ZAR"), cls: "rails" },
+  ].map((t) => `<div class="tile ${t.cls || ""}"><div class="k">${t.k}</div><div class="v" style="font-size:${String(t.v).length > 9 ? 17 : 22}px">${t.v}</div></div>`).join("");
+}
+
+/* ================================================================ wiring */
+const RENDER = {
+  0: renderPersonas,
+  1: renderDash,
+  2: renderRates,
+  3: renderQuote,
+  4: renderBook,
+  5: renderTrack,
+  6: renderCustoms,
+  7: renderMoney,
+  8: renderAudit,
+  9: renderCompliance,
+  10: renderPortal,
+  11: renderNetwork,
+  12: renderArch,
+  13: renderClose,
+};
+
+$("#next-btn").addEventListener("click", () => go(S.act + 1));
+$("#prev-btn").addEventListener("click", () => go(S.act - 1));
+
+document.addEventListener("keydown", (e) => {
+  if (/input|select|textarea/i.test(e.target.tagName)) return;
+  if (e.key === "ArrowRight") go(S.act + 1);
+  if (e.key === "ArrowLeft") go(S.act - 1);
+});
+
+/* Theme toggle mirrors the console's own. */
+const themeBtn = $("#theme-btn");
+function syncThemeLabel() {
+  const dark = document.documentElement.dataset.theme
+    ? document.documentElement.dataset.theme === "dark"
+    : !window.matchMedia("(prefers-color-scheme: light)").matches;
+  themeBtn.textContent = dark ? "Light" : "Dark";
+}
+themeBtn.addEventListener("click", () => {
+  const cur = document.documentElement.dataset.theme
+    || (window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark");
+  document.documentElement.dataset.theme = cur === "dark" ? "light" : "dark";
+  syncThemeLabel();
+  RENDER[S.act] && RENDER[S.act]();
+});
+syncThemeLabel();
+
+renderRail();
+go(0);
+</script>

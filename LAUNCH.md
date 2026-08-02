@@ -714,6 +714,14 @@ equals `NULL` in Postgres, so a three-column unique index over a nullable
 findings that matter most — the invoice-level ones. Split into two partial
 indexes.
 
+### The demo
+
+The investor walkthrough gained three acts and lost none: the invoice as a
+document, the four-way match over it, and the external systems the platform is
+wired for with the accreditations each one needs. Its source now lives in
+`demo/` and builds with `python3 demo/build.py` — it had been sitting in a
+scratch directory, which is a poor place for the thing you show investors.
+
 ### Verified live
 
 Quoted a real consignment, booked it, added seven charge lines across seven

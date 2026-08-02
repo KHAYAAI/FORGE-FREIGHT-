@@ -14,6 +14,10 @@ export default tseslint.config(
       "**/*.config.{js,mjs,ts}",
       // Next.js-generated, regenerated on every build — not ours to lint.
       "**/next-env.d.ts",
+      // The investor demo is assembled from fragments — `demo/assets.js` is a
+      // block of constants spliced into another file's scope, so linting it as
+      // a standalone module reports every one of them as unused.
+      "demo/**",
     ],
   },
   js.configs.recommended,

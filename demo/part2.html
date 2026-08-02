@@ -1,0 +1,811 @@
+<div class="deck">
+
+  <nav class="rail" aria-label="Walkthrough">
+    <div class="brand">
+      <div class="mark">F</div>
+      <div>
+        <div class="brand-name">FORGE</div>
+        <div class="brand-sub">Freight OS</div>
+      </div>
+    </div>
+
+    <div class="rail-label">The shipment</div>
+    <div class="acts" id="acts-main"></div>
+
+    <div class="rail-label">The platform</div>
+    <div class="acts" id="acts-rails"></div>
+  </nav>
+
+  <main class="stage">
+    <header class="topbar">
+      <span class="pill-live"><i class="dot pulse"></i> <span id="conn">Session · dev</span></span>
+      <div class="who" id="who" hidden>
+        <span class="mark" style="width:18px;height:18px;font-size:10px;border-radius:3px" id="who-av">U</span>
+        <b id="who-name">—</b>
+        <span class="role" id="who-role">—</span>
+      </div>
+      <div class="who" style="margin-left:0">
+        <button class="btn ghost sm" id="theme-btn" type="button">Light</button>
+      </div>
+    </header>
+
+    <!-- =============================================== 0 · LOGIN ======= -->
+    <section class="act" id="act-0" aria-labelledby="h-0">
+      <div class="eyebrow">Act 0 — Access</div>
+      <h1 class="title" id="h-0">Every session starts with a tenant</h1>
+      <p class="lede">
+        FORGE is multi-tenant to the query layer, not to a config flag. Who you sign in as
+        decides which product you get: a forwarder sees an operations console, a shipper sees
+        only its own cargo, and a partner agent sees its own book of business plus what it owes
+        the platform. <b>Pick a seat and the rest of this walkthrough follows that person.</b>
+      </p>
+
+      <div class="grid g-32">
+        <div class="login-wrap" style="min-height:auto">
+          <div class="login-card">
+            <div class="kc-strip">
+              <span class="lock">&#128274;</span>
+              <span>keycloak.forgefreight.co.za/realms/forge-freight</span>
+            </div>
+            <div class="eyebrow">Session</div>
+            <h2 style="font-size:16px;font-weight:600;margin:5px 0 4px">Sign in to the console</h2>
+            <p class="small muted" style="margin:0 0 14px">
+              Authorization code flow with PKCE. The access token carries a
+              <span class="mono">tenant_id</span> claim; the API refuses anything without one.
+            </p>
+
+            <div class="persona" id="persona-list"></div>
+
+            <button class="btn primary" id="sign-in" style="width:100%;margin-top:14px;padding:9px" disabled>
+              Enter console
+            </button>
+            <p class="small muted center" style="margin:11px 0 0">
+              Roles come from the realm. <span class="mono">admin</span> ·
+              <span class="mono">finance</span> · <span class="mono">ops</span>
+            </p>
+          </div>
+        </div>
+
+        <div class="stack">
+          <div class="panel">
+            <div class="panel-head"><div><div class="eyebrow">Isolation</div><h2>What a seat decides</h2></div></div>
+            <div class="kv"><span class="k">Which rows you can read</span><span class="v">tenant_id predicate</span></div>
+            <div class="kv"><span class="k">Which screens exist</span><span class="v">tenant type</span></div>
+            <div class="kv"><span class="k">Which writes you may make</span><span class="v">realm role</span></div>
+            <div class="kv"><span class="k">Which cargo a shipper sees</span><span class="v">linked party</span></div>
+            <p class="small muted" style="margin:12px 0 0">
+              A customer's cargo belongs to the <em>forwarder's</em> tenant — the forwarder booked it.
+              So the portal cannot use the tenant predicate; it scopes by the parties a forwarder has
+              explicitly linked. That is the one deliberate cross-tenant read in the platform, and it
+              lives in its own controller so the two rules never meet in one query.
+            </p>
+          </div>
+          <div class="panel">
+            <div class="panel-head"><div><div class="eyebrow">Not a mock</div><h2>This walkthrough runs the real arithmetic</h2></div></div>
+            <p class="small muted" style="margin:0">
+              Rates, margin resolution, SARS duty and VAT, platform fees and payment reconciliation
+              in this demo are the same formulas the API runs, at the same integer-cent precision.
+              Every action you take appends to one event log, and every screen you see is a
+              projection of it.
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- =============================================== 1 · DASHBOARD === -->
+    <section class="act" id="act-1" aria-labelledby="h-1">
+      <div class="eyebrow">Act 1 — Situation</div>
+      <h1 class="title" id="h-1">The book, on one screen</h1>
+      <p class="lede">
+        A forwarder's real question at 07:00 is not "how many shipments" — it is
+        <b>which corridor is about to cost me money today</b>. The map is the triage surface: a lane
+        turns red the moment any shipment on it raises an exception.
+      </p>
+
+      <div class="grid g4" style="margin-bottom:14px" id="dash-tiles"></div>
+
+      <div class="panel flush" style="margin-bottom:14px">
+        <div style="padding:14px 16px 10px" class="panel-head">
+          <div><div class="eyebrow">Freight on the water and on the road</div><h2>Active corridors</h2></div>
+          <div class="actions" id="dash-legend"></div>
+        </div>
+        <div class="map-wrap" id="dash-map"></div>
+        <div class="map-foot">
+          <span id="dash-map-foot">—</span>
+          <span>Equirectangular · UN/LOCODE</span>
+        </div>
+      </div>
+
+      <div class="grid g-53">
+        <div class="panel flush">
+          <div style="padding:14px 16px 8px" class="panel-head">
+            <div><div class="eyebrow">Newest first</div><h2>Recent shipments</h2></div>
+          </div>
+          <div class="scroll-x"><table class="tbl" id="dash-ships"></table></div>
+        </div>
+        <div class="panel">
+          <div class="panel-head"><div><div class="eyebrow">Ops console</div><h2>Needs attention</h2></div></div>
+          <div id="dash-exc" class="stack" style="gap:8px"></div>
+        </div>
+      </div>
+
+      <details class="hood">
+        <summary>Under the hood — how this screen is built</summary>
+        <div class="body">
+          <p class="small muted" style="margin:0 0 10px">
+            The map does not summarise the rows below it. Counting a page of shipments would have
+            described the first fifty and called it the book — so lanes come from
+            <span class="mono">GET /ops/corridors</span>, a database-side aggregate over the whole
+            book with open-exception counts per lane. The list underneath is keyset-paginated on
+            <span class="mono">(created_at, id)</span>; offsets skip and repeat rows when freight is
+            booked while an operator pages.
+          </p>
+          <div class="evt"><span class="ts mono">SQL</span><span class="ty mono">/ops/corridors</span><span class="pl">count(distinct shipment) group by (origin, destination), left join open exceptions</span></div>
+          <div class="evt"><span class="ts mono">SQL</span><span class="ty mono">/shipments</span><span class="pl">where tenant_id = $caller order by created_at desc, id desc limit 51</span></div>
+        </div>
+      </details>
+    </section>
+
+    <!-- =============================================== 2 · RATES ======= -->
+    <section class="act" id="act-2" aria-labelledby="h-2">
+      <div class="eyebrow">Act 2 — Price</div>
+      <h1 class="title" id="h-2">Buy rates, and the margin on top</h1>
+      <p class="lede">
+        Two tables decide every number this business earns. <b>Rate cards</b> are what the carrier
+        charges; <b>margin rules</b> are what you charge on top. Quoting reads straight from here —
+        which means pricing a new corridor is a commercial decision, not an engineering ticket.
+      </p>
+
+      <div class="grid g-53">
+        <div class="panel flush">
+          <div style="padding:14px 16px 8px" class="panel-head">
+            <div><div class="eyebrow">What the freight costs you</div><h2>Rate cards</h2></div>
+          </div>
+          <div class="scroll-x"><table class="tbl" id="rate-tbl"></table></div>
+        </div>
+
+        <div class="stack">
+          <div class="panel">
+            <div class="panel-head"><div><div class="eyebrow">What you charge on top</div><h2>Margin rules</h2></div></div>
+            <div class="scroll-x"><table class="tbl" id="margin-tbl"></table></div>
+          </div>
+          <div class="note">
+            <b>Most specific wins.</b> Customer beats lane beats mode; the all-null rule is the
+            tenant default. Ties break by recency — two rules of equal scope used to resolve to
+            whichever row Postgres returned first, so the same quote could price at 15% or 18% on
+            two runs with nothing changed.
+          </div>
+        </div>
+      </div>
+
+      <details class="hood">
+        <summary>Under the hood — surcharges are a set, not a diff</summary>
+        <div class="body">
+          <p class="small muted" style="margin:0">
+            A tariff arrives as a sheet, so surcharges are replaced wholesale rather than patched
+            row by row: "these are the costs now" is the only statement that cannot leave a
+            withdrawn bunker adjustment behind. <span class="mono">PERCENT_OF_FREIGHT</span> reuses
+            the amount column for basis points, so it is capped at 10 000 — a 15% BAF typed as
+            <span class="mono">150000</span> would otherwise bill 1 500% of freight.
+          </p>
+        </div>
+      </details>
+    </section>
+
+    <!-- =============================================== 3 · QUOTE ======= -->
+    <section class="act" id="act-3" aria-labelledby="h-3">
+      <div class="eyebrow">Act 3 — Quote</div>
+      <h1 class="title" id="h-3">Price a corridor in one pass</h1>
+      <p class="lede">
+        Pick a lane and the engine selects the cheapest valid rate card, resolves the most specific
+        margin rule, and prices every surcharge on its own basis. <b>Move the margin and watch the
+        whole quote recompute</b> — this is the arithmetic the API actually runs.
+      </p>
+
+      <div class="grid g-32">
+        <div class="panel">
+          <div class="panel-head"><div><div class="eyebrow">New quote</div><h2>Request</h2></div></div>
+          <div class="grid g2" style="gap:12px">
+            <label class="field"><span>Customer</span>
+              <select class="ctl" id="q-cust">
+                <option value="Ubuntu Trading (Pty) Ltd">Ubuntu Trading (Pty) Ltd</option>
+                <option value="Kalahari Retail Group">Kalahari Retail Group</option>
+              </select>
+            </label>
+            <label class="field"><span>Lane</span>
+              <select class="ctl" id="q-lane"></select>
+            </label>
+            <label class="field"><span>Equipment</span>
+              <select class="ctl" id="q-eq"><option>40HC</option><option>40GP</option><option>20GP</option></select>
+            </label>
+            <label class="field"><span>Containers</span>
+              <input class="ctl tab" id="q-qty" type="number" min="1" max="20" value="2">
+            </label>
+          </div>
+
+          <div style="margin-top:16px">
+            <div class="row" style="justify-content:space-between">
+              <span class="mono" style="font-size:9.5px;letter-spacing:.13em;text-transform:uppercase;color:var(--t3)">Margin on buy</span>
+              <span class="mono tab" id="q-margin-out" style="color:var(--accent-strong);font-weight:600">18.00%</span>
+            </div>
+            <input type="range" id="q-margin" min="500" max="4000" step="25" value="1800"
+                   aria-label="Margin in basis points">
+            <div class="row small muted" style="justify-content:space-between;margin-top:-2px">
+              <span>5%</span><span id="q-rule-note">resolved rule · tenant default</span><span>40%</span>
+            </div>
+          </div>
+
+          <div class="row" style="margin-top:16px">
+            <button class="btn primary" id="q-issue">Issue quote</button>
+            <button class="btn ghost" id="q-pdf">Download PDF</button>
+          </div>
+        </div>
+
+        <div class="panel flush">
+          <div style="padding:14px 16px 8px" class="panel-head">
+            <div><div class="eyebrow" id="q-carrier">—</div><h2>Priced lines</h2></div>
+            <div class="actions"><span class="tag accent" id="q-transit">—</span></div>
+          </div>
+          <div class="scroll-x"><table class="tbl" id="q-lines"></table></div>
+          <div style="padding:12px 16px 16px" id="q-totals"></div>
+        </div>
+      </div>
+
+      <details class="hood">
+        <summary>Under the hood — an unpriced lane is a 422, not a 500</summary>
+        <div class="body">
+          <p class="small muted" style="margin:0">
+            "We don't price that corridor" is an ordinary answer to an ordinary request, so
+            <span class="mono">NoRateError</span> and <span class="mono">NoMarginRuleError</span> map
+            to <span class="mono">422</span> carrying the lane in the message. Found live: quoting an
+            unpriced lane used to log a stack trace and return
+            <span class="mono">500 Internal server error</span>, which tells a customer nothing and
+            buries a real configuration gap under noise.
+          </p>
+        </div>
+      </details>
+    </section>
+
+    <!-- =============================================== 4 · BOOK ======== -->
+    <section class="act" id="act-4" aria-labelledby="h-4">
+      <div class="eyebrow">Act 4 — Commit</div>
+      <h1 class="title" id="h-4">Accepting a quote is a written fact</h1>
+      <p class="lede">
+        Booking is where this stops being a CRUD app. The quote, the booking, the shipment and the
+        <span class="mono">shipment.booked</span> event are written in <b>one transaction</b> — and
+        the event is what every downstream view is built from, not a side effect of it.
+      </p>
+
+      <div class="grid g-32">
+        <div class="stack">
+          <div class="panel" id="book-panel">
+            <div class="panel-head"><div><div class="eyebrow">Quote</div><h2 id="book-ref">—</h2></div>
+              <div class="actions"><span class="tag" id="book-status"><i></i>Draft</span></div></div>
+            <div id="book-summary"></div>
+            <div class="row" style="margin-top:14px">
+              <button class="btn primary" id="book-btn">Accept &amp; book</button>
+              <span class="small muted" id="book-hint">Screens the customer against sanctions first.</span>
+            </div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-head"><div><div class="eyebrow">Written together or not at all</div><h2>The transaction</h2></div></div>
+            <div class="arch" id="book-tx"></div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head"><div><div class="eyebrow">Transactional outbox</div><h2>Event log</h2></div></div>
+          <div id="book-events" class="stack" style="gap:0"></div>
+          <p class="small muted" style="margin:12px 0 0">
+            Events land in Postgres in the same transaction as the projection write, then a relay
+            ships them to Redpanda and stamps <span class="mono">published_at</span>. At-least-once
+            delivery, with a partial unique index on <span class="mono">(type, source_ref)</span> so a
+            redelivered carrier message is idempotent.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <!-- =============================================== 5 · TRACK ======= -->
+    <section class="act" id="act-5" aria-labelledby="h-5">
+      <div class="eyebrow">Act 5 — Movement</div>
+      <h1 class="title" id="h-5">One event stream, every view</h1>
+      <p class="lede">
+        Carriers speak DCSA, telematics speaks Traccar, forwarders speak EDIFACT. All three are
+        parsed into one canonical event. <b>Advance the shipment</b> and watch the map, the customer
+        timeline, the exception board and the ledger all move from the same fact.
+      </p>
+
+      <div class="row" style="margin-bottom:14px">
+        <button class="btn primary" id="adv-btn">Advance shipment</button>
+        <button class="btn ghost" id="roll-btn">Simulate carrier roll</button>
+        <button class="btn ghost" id="reset-btn">Reset</button>
+        <span class="spacer"></span>
+        <span class="tag" id="ship-status"><i></i>—</span>
+      </div>
+
+      <div class="grid g-53">
+        <div class="stack">
+          <div class="panel flush">
+            <div style="padding:14px 16px 10px" class="panel-head">
+              <div><div class="eyebrow">Live position</div><h2 id="track-lane">—</h2></div>
+              <div class="actions"><span class="tag accent" id="track-eta">—</span></div>
+            </div>
+            <div class="map-wrap" id="track-map"></div>
+            <div class="map-foot"><span id="track-foot">—</span><span>DCSA · AIS · Traccar</span></div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-head"><div><div class="eyebrow">Ops console</div><h2>Exception board</h2></div></div>
+            <div id="exc-board" class="stack" style="gap:8px"></div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head"><div><div class="eyebrow">What the shipper sees</div><h2>Journey</h2></div></div>
+          <div class="tl" id="track-tl"></div>
+        </div>
+      </div>
+
+      <details class="hood">
+        <summary>Under the hood — the canonical event, and who consumes it</summary>
+        <div class="body" id="track-hood"></div>
+      </details>
+    </section>
+
+    <!-- =============================================== 6 · CUSTOMS ===== -->
+    <section class="act" id="act-6" aria-labelledby="h-6">
+      <div class="eyebrow">Act 6 — Clearance</div>
+      <h1 class="title" id="h-6">Customs is where forwarders actually lose money</h1>
+      <p class="lede">
+        A misclassified line is a penalty; a stopped entry is demurrage. FORGE classifies against a
+        SARS tariff extract, computes duty and import VAT to the cent, and <b>refuses to submit an
+        entry whose lines a human has not confirmed</b>.
+      </p>
+
+      <div class="grid g-32">
+        <div class="panel flush">
+          <div style="padding:14px 16px 8px" class="panel-head">
+            <div><div class="eyebrow">Bill of entry · draft</div><h2 id="cust-ref">—</h2></div>
+            <div class="actions"><span class="tag" id="cust-status"><i></i>Draft</span></div>
+          </div>
+          <div class="scroll-x"><table class="tbl" id="cust-lines"></table></div>
+          <div style="padding:12px 16px 16px" id="cust-totals"></div>
+        </div>
+
+        <div class="stack">
+          <div class="panel">
+            <div class="panel-head"><div><div class="eyebrow">SARS arithmetic</div><h2>How the VAT is derived</h2></div></div>
+            <div id="cust-math"></div>
+          </div>
+          <div class="panel">
+            <div class="panel-head"><div><div class="eyebrow">Entry state machine</div><h2>Progress</h2></div></div>
+            <div class="chip-row" id="cust-states" style="margin-bottom:12px"></div>
+            <div class="row">
+              <button class="btn primary sm" id="cust-confirm">Confirm classification</button>
+              <button class="btn sm" id="cust-submit" disabled>Submit to SARS</button>
+              <button class="btn ghost sm" id="cust-release" disabled>Record release</button>
+            </div>
+            <p class="small muted" style="margin:11px 0 0" id="cust-hint">
+              Two of three lines came back below the confidence threshold. They need a human.
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- =============================================== 7 · MONEY ======= -->
+    <section class="act" id="act-7" aria-labelledby="h-7">
+      <div class="eyebrow">Act 7 — The invoice</div>
+      <h1 class="title" id="h-7">One standard document, whoever is billing</h1>
+      <p class="lede">
+        Charges are written by the event consumers as the freight moves — nobody keys them in. What
+        comes out is not a total and a due date: it is a <b>consolidated multi-party billing
+        document</b>, with every line stating whose cost it carries and whether it was passed
+        through at cost, marked up, or originated by the forwarder. <b>No forwarder invoice in the
+        market carries that last field.</b>
+      </p>
+
+      <div class="grid g-32">
+        <div class="stack">
+          <div class="panel flush">
+            <div style="padding:14px 16px 8px" class="panel-head">
+              <div><div class="eyebrow">Accrued by consumers</div><h2>Charges on this shipment</h2></div>
+              <div class="actions"><button class="btn sm" id="inv-issue">Issue invoice</button></div>
+            </div>
+            <div class="scroll-x"><table class="tbl" id="charge-tbl"></table></div>
+          </div>
+
+          <div class="panel flush" id="inv-panel" hidden>
+            <div style="padding:14px 16px 8px" class="panel-head">
+              <div><div class="eyebrow">Accounts receivable</div><h2 id="inv-num">—</h2></div>
+              <div class="actions"><span class="tag" id="inv-status"><i></i>Issued</span></div>
+            </div>
+            <div class="scroll-x"><table class="tbl" id="pay-tbl"></table></div>
+            <div style="padding:13px 16px 16px">
+              <div class="row" style="align-items:flex-end;gap:10px">
+                <label class="field" style="flex:1;min-width:120px"><span>Amount</span>
+                  <input class="ctl tab" id="pay-amt" type="number" step="0.01"></label>
+                <label class="field" style="flex:1;min-width:140px"><span>Bank reference *</span>
+                  <input class="ctl mono" id="pay-ref" placeholder="FNB-2026-…"></label>
+                <button class="btn primary" id="pay-btn">Record payment</button>
+              </div>
+              <p class="small" id="pay-msg" style="margin:9px 0 0;min-height:17px"></p>
+            </div>
+          </div>
+        </div>
+
+        <div class="stack">
+          <div class="panel">
+            <div class="panel-head"><div><div class="eyebrow">This shipment</div><h2>Margin realised</h2></div></div>
+            <div id="pnl"></div>
+          </div>
+          <div class="note">
+            <b>The reference is the bank's, not ours.</b> It is unique per invoice, so recording it
+            twice changes nothing and emits nothing. Before this existed, two half payments left an
+            invoice part-paid forever and a redelivered webhook credited the customer twice —
+            the form even invented a reference from the clock when one was left blank, which meant
+            every retry looked like new money.
+          </div>
+          <div class="panel">
+            <div class="panel-head"><div><div class="eyebrow">Trade finance</div><h2>What the ledger unlocks</h2></div></div>
+            <p class="small muted" style="margin:0 0 10px">
+              Financial events are mapped through an ontology bridge into a ledger feed. Duty
+              outlay and receivables become financeable positions the day they are recorded —
+              the second product, sitting on data the first one produces for free.
+            </p>
+            <div id="finance-views"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel flush" id="doc-panel" hidden style="margin-top:16px">
+        <div style="padding:14px 16px 8px" class="panel-head">
+          <div><div class="eyebrow">Issued document</div><h2>The invoice as the customer receives it</h2></div>
+          <div class="actions"><span class="small muted">Company-specific numbering, registrations and bank details</span></div>
+        </div>
+        <div id="doc-body" style="padding:0 16px 18px"></div>
+      </div>
+
+      <details class="hood">
+        <summary>Under the hood — what makes this multi-company rather than one forwarder's system</summary>
+        <div class="body">
+          <p class="small muted" style="margin:0 0 10px">
+            Every company on the platform issues under its own registration, its own VAT and customs
+            client numbers, its own bank account and <b>its own gapless numbering series</b> —
+            incremented inside the issuing transaction rather than drawn from a shared sequence,
+            because several jurisdictions require an issuer's numbering to be sequential with no
+            gaps, and a shared sequence hands company B the numbers company A did not use. The
+            issuer and bill-to blocks are snapshotted onto the invoice: a company that changes its
+            bank account tomorrow must not change what today's invoice says.
+          </p>
+          <div class="evt"><span class="ts mono">TABLE</span><span class="ty mono">tenant_billing_profiles</span><span class="pl">legal name · registration · VAT · customs client number · bank · prefix · next_invoice_number · terms · VAT rate · footer</span></div>
+          <div class="evt"><span class="ts mono">SQL</span><span class="ty mono">next number</span><span class="pl">update tenant_billing_profiles set next_invoice_number = next_invoice_number + 1 … returning</span></div>
+          <div class="evt"><span class="ts mono">NOTICE</span><span class="ty mono">every document</span><span class="pl">not a commercial invoice · not a bill of lading</span></div>
+        </div>
+      </details>
+    </section>
+
+    <!-- =============================================== 8 · AUDIT ======= -->
+    <section class="act" id="act-8" aria-labelledby="h-8">
+      <div class="eyebrow">Act 8 — Assurance</div>
+      <h1 class="title" id="h-8">Four-way matching, before the money leaves</h1>
+      <p class="lede">
+        Roughly four freight invoices in five carry a discrepancy, and overcharges average eight to
+        ten per cent of the affected line. Most accounts-payable teams run a <b>two-way</b> match —
+        invoice against quote total — which catches almost none of it, because the errors live
+        inside lines nobody quoted. Every line here is checked against <b>four</b> sources.
+      </p>
+
+      <div class="grid g4" style="margin-bottom:14px" id="audit-sources"></div>
+
+      <div class="grid g-53">
+        <div class="stack">
+          <div class="panel flush">
+            <div style="padding:14px 16px 8px" class="panel-head">
+              <div><div class="eyebrow">Pre-payment</div><h2>Findings</h2></div>
+              <div class="actions">
+                <button class="btn sm" id="audit-run">Run the match</button>
+                <button class="btn sm" id="audit-packet">Dispute packet</button>
+              </div>
+            </div>
+            <div id="audit-findings" style="padding:4px 16px 16px"></div>
+          </div>
+
+          <div class="panel flush" id="packet-panel" hidden>
+            <div style="padding:14px 16px 8px" class="panel-head">
+              <div><div class="eyebrow">Ready to send</div><h2>Dispute packet</h2></div>
+            </div>
+            <pre class="mono" id="packet-body" style="margin:0;padding:0 16px 18px;white-space:pre-wrap;font-size:11px;line-height:1.6;color:var(--t2)"></pre>
+          </div>
+        </div>
+
+        <div class="stack">
+          <div class="panel">
+            <div class="panel-head"><div><div class="eyebrow">Where the money hides</div><h2>Error concentration</h2></div></div>
+            <p class="small muted" style="margin:0 0 11px">
+              Three categories carry the highest documented error rates, and it is not the ones AP
+              looks at. Base ocean freight is the most scrutinised line on the invoice and therefore
+              the cleanest. The taxonomy marks these so the audit spends its attention where the
+              money actually is.
+            </p>
+            <div id="audit-risk"></div>
+          </div>
+          <div class="note">
+            <b>Scale is the whole argument.</b> The R300-a-container handling variance above is
+            beneath anyone's review threshold on one shipment. Applied to every container through
+            one port for a year, it is the largest single recoverable number a forwarder has — and
+            it is invisible from invoice-level review. Systematic billing errors run 1.5–2.5% of
+            total forwarder spend.
+          </div>
+          <div class="panel">
+            <div class="panel-head"><div><div class="eyebrow">Portfolio</div><h2>If this ran across the book</h2></div></div>
+            <div id="audit-portfolio"></div>
+          </div>
+        </div>
+      </div>
+
+      <details class="hood">
+        <summary>Under the hood — why the findings are persisted rather than computed on read</summary>
+        <div class="body">
+          <p class="small muted" style="margin:0 0 10px">
+            A finding is a thing a person acts on — accepts, queries, resolves — so its state has to
+            outlive the request. Re-running the match upserts on a unique index, so opening the
+            screen twice does not double the list, and <b>a human's decision is never reset by a
+            re-run</b>. Querying a line marks the charge, and the document holds that amount back
+            from the balance while still showing it: netting it off would quietly reissue the
+            invoice.
+          </p>
+          <div class="evt"><span class="ts mono">RULE</span><span class="ty mono">MARGIN_ON_PASS_THROUGH</span><span class="pl">a disbursement billed above its own cost is mislabelled, not priced</span></div>
+          <div class="evt"><span class="ts mono">RULE</span><span class="ty mono">VAT_ON_DISBURSEMENT</span><span class="pl">output tax on a recovered statutory amount overstates the invoice and the VAT return together</span></div>
+          <div class="evt"><span class="ts mono">RULE</span><span class="ty mono">SERVICE_NOT_EVIDENCED</span><span class="pl">a delivery charge on a container that never left the terminal is work not done</span></div>
+          <div class="evt"><span class="ts mono">RULE</span><span class="ty mono">DEMURRAGE_DAYS_VARIANCE</span><span class="pl">days recomputed from free time and the terminal gate clock</span></div>
+        </div>
+      </details>
+    </section>
+
+    <!-- =============================================== 9 · COMPLY ====== -->
+    <section class="act" id="act-9" aria-labelledby="h-9">
+      <div class="eyebrow">Act 9 — Compliance</div>
+      <h1 class="title" id="h-9">Half the value chain is somebody else's system</h1>
+      <p class="lede">
+        The revenue authority, the carrier, the terminal, the index publisher. Several of them
+        cannot be switched on with a URL — they need a registration or a certificate a person has to
+        apply for. Every one is <b>wired, config-gated, and honest about being dark</b>: the
+        platform degrades to a stated partial and never to a plausible guess.
+      </p>
+
+      <div class="grid g4" style="margin-bottom:14px" id="int-tiles"></div>
+
+      <div class="grid g-53">
+        <div class="panel flush">
+          <div style="padding:14px 16px 8px" class="panel-head">
+            <div><div class="eyebrow">External systems</div><h2>What is live, what is dark, and why</h2></div>
+          </div>
+          <div id="int-list" style="padding:2px 16px 16px"></div>
+        </div>
+
+        <div class="stack">
+          <div class="panel">
+            <div class="panel-head"><div><div class="eyebrow">SARS</div><h2>The filing that still works</h2></div></div>
+            <p class="small muted" style="margin:0 0 11px">
+              With no EDI channel configured, the declaration is still built, validated against the
+              tariff book and stored complete. It stops at <span class="mono">QUEUED</span> with the
+              reason on it and exports for manual capture — a working state, not a broken one, and
+              the day the accreditation lands it becomes a live submission with no change to the
+              data model.
+            </p>
+            <div id="filing-box"></div>
+          </div>
+          <div class="note">
+            <b>The audit will not invent a benchmark.</b> Fuel surcharges are the highest-error
+            category on a forwarder invoice. A guessed index level would produce confident findings
+            that collapse the moment a vendor asks where the number came from — so an unconfigured
+            feed raises a finding of its own, states the total left unchecked, and names the
+            variable that would enable the rule.
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================================== 10 · PORTAL ===== -->
+    <section class="act" id="act-10" aria-labelledby="h-10">
+      <div class="eyebrow">Act 10 — The shipper</div>
+      <h1 class="title" id="h-10">The same shipment, from the other side</h1>
+      <p class="lede">
+        Sign in as the customer and the console becomes a different product. Same database, same
+        events — <b>a scoping rule and a vocabulary apart</b>. Milestones are worded for a shipper,
+        and cost build-up is withheld: the forwarder's margin is its own business.
+      </p>
+
+      <div class="row" style="margin-bottom:14px">
+        <button class="btn" id="portal-toggle">View as Ubuntu Trading</button>
+        <span class="small muted" id="portal-note">Currently: operator console</span>
+      </div>
+
+      <div class="grid g-53">
+        <div class="panel flush">
+          <div style="padding:14px 16px 10px" class="panel-head">
+            <div><div class="eyebrow" id="portal-eyebrow">Your cargo</div><h2 id="portal-title">My shipments</h2></div>
+          </div>
+          <div class="scroll-x"><table class="tbl" id="portal-tbl"></table></div>
+        </div>
+        <div class="panel">
+          <div class="panel-head"><div><div class="eyebrow">Withheld from the customer</div><h2>What is filtered</h2></div></div>
+          <div id="portal-filter"></div>
+        </div>
+      </div>
+
+      <details class="hood">
+        <summary>Under the hood — the one deliberate cross-tenant read</summary>
+        <div class="body">
+          <p class="small muted" style="margin:0 0 10px">
+            A customer's cargo belongs to the forwarder's tenant, so the portal cannot use
+            <span class="mono">tenant_id = caller</span>. It resolves
+            <span class="mono">parties.customer_tenant_id</span> to a set of party ids and filters
+            bookings by it. No link, no visibility — invisible is the default. An unknown shipment
+            returns <span class="mono">null</span> rather than 403, so probing cannot distinguish
+            "not yours" from "doesn't exist".
+          </p>
+          <div class="evt"><span class="ts mono">SQL</span><span class="ty mono">/portal/shipments</span><span class="pl">inner join bookings on bookings.id = shipments.booking_id where bookings.customer_id in (:scope)</span></div>
+          <div class="evt"><span class="ts mono">FILTER</span><span class="ty mono">/portal/…/events</span><span class="pl">drop charge.* and quote.issued</span></div>
+        </div>
+      </details>
+    </section>
+
+    <!-- =============================================== 9 · NETWORK ===== -->
+    <section class="act" id="act-11" data-thread="rails" aria-labelledby="h-11">
+      <div class="eyebrow rails">Act 11 — The second business</div>
+      <h1 class="title" id="h-11">Every partner's freight pays a toll</h1>
+      <p class="lede">
+        Everything so far was the forwarding business: our customers, our margin, our operational
+        risk. <b>The infrastructure business is other forwarders running their own book on these
+        rails</b> — their branding, their customers, their relationships — and a platform fee on
+        every shipment they move.
+      </p>
+
+      <div class="grid g4" style="margin-bottom:14px" id="net-tiles"></div>
+
+      <div class="grid g-53">
+        <div class="panel flush">
+          <div style="padding:14px 16px 8px" class="panel-head">
+            <div><div class="eyebrow rails">Running on our rails</div><h2>Partner agents</h2></div>
+            <div class="actions">
+              <button class="btn sm" id="net-ship">Ship one on the rails</button>
+              <button class="btn rails sm" id="net-add">Onboard partner</button>
+            </div>
+          </div>
+          <div class="scroll-x"><table class="tbl" id="net-tbl"></table></div>
+        </div>
+
+        <div class="stack">
+          <div class="panel">
+            <div class="panel-head"><div><div class="eyebrow rails">Unit economics</div><h2>Why this is the venture case</h2></div></div>
+            <div id="net-econ"></div>
+            <p class="small muted" style="margin:12px 0 0">
+              The forwarding business earns margin and carries operational risk on every box. The
+              platform earns basis points and carries none — it scales with the network's volume,
+              not with our headcount.
+            </p>
+          </div>
+          <div class="panel">
+            <div class="panel-head"><div><div class="eyebrow rails">Model 2</div><h2>Corridor visibility</h2></div></div>
+            <p class="small muted" style="margin:0 0 10px">
+              Aggregate every tenant's freight and you have a national trade-corridor picture:
+              lane, volume, status — never customer-level detail. That is a dataset a customs
+              authority or a development bank buys, and it is a by-product of running the rails.
+            </p>
+            <div class="map-wrap" id="net-map"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- =============================================== 10 · ARCH ======= -->
+    <section class="act" id="act-12" data-thread="rails" aria-labelledby="h-12">
+      <div class="eyebrow rails">Act 12 — Underneath</div>
+      <h1 class="title" id="h-12">Why it holds together</h1>
+      <p class="lede">
+        The whole product is one idea applied consistently: <b>freight facts are events, everything
+        else is a projection.</b> That is what lets an operator console, a customer portal, a
+        customs filing and a finance ledger disagree about vocabulary while never disagreeing
+        about facts.
+      </p>
+
+      <div class="panel" style="margin-bottom:14px">
+        <div class="panel-head"><div><div class="eyebrow">Runtime</div><h2>Services</h2></div></div>
+        <div class="arch" id="arch-nodes"></div>
+      </div>
+
+      <div class="grid g2">
+        <div class="panel">
+          <div class="panel-head"><div><div class="eyebrow">Event catalogue</div><h2>Versioned, not ad hoc</h2></div></div>
+          <div class="chip-row" id="arch-events"></div>
+          <p class="small muted" style="margin:12px 0 0">
+            Every event has a Zod schema and a version. Consumers dedupe on
+            <span class="mono">event_id</span>; a partial unique index on
+            <span class="mono">(type, source_ref)</span> makes a redelivered carrier webhook a no-op.
+          </p>
+        </div>
+        <div class="panel">
+          <div class="panel-head"><div><div class="eyebrow">Proof, not assertion</div><h2>What is actually verified</h2></div></div>
+          <div id="arch-tests"></div>
+          <p class="small muted" style="margin:12px 0 0">
+            Isolation tests are mutation-proven: deleting the tenant predicate from the shipments
+            query fails three of them, and deleting the portal's scope predicate fails three more.
+            A test suite that still passes with the security removed is decoration.
+          </p>
+        </div>
+      </div>
+
+      <details class="hood">
+        <summary>Under the hood — the honest list of what is not done</summary>
+        <div class="body" id="arch-gaps"></div>
+      </details>
+    </section>
+
+    <!-- =============================================== 11 · CLOSE ====== -->
+    <section class="act" id="act-13" data-thread="rails" aria-labelledby="h-13">
+      <div class="eyebrow rails">Act 13 — The ask</div>
+      <h1 class="title" id="h-13">Two businesses, one codebase</h1>
+      <p class="lede">
+        The forwarding business pays for the company and proves the software on real freight. The
+        infrastructure business is the one that compounds. <b>Both run on the system you have just
+        clicked through.</b>
+      </p>
+
+      <div class="grid g2" style="margin-bottom:16px">
+        <div class="panel" style="border-color:var(--accent-border)">
+          <div class="eyebrow">Model 1</div>
+          <h2 style="font-size:17px;font-weight:600;margin:4px 0 8px">Be the forwarder</h2>
+          <div class="bignum" style="color:var(--accent-strong)" id="close-m1">—</div>
+          <p class="small muted" style="margin:8px 0 12px">
+            Margin on freight we personally handle, on this walkthrough's single shipment.
+            Known market, immediate revenue, operational risk on every box.
+          </p>
+          <div id="close-m1-detail"></div>
+        </div>
+        <div class="panel" style="border-color:var(--rails-border)">
+          <div class="eyebrow rails">Model 2</div>
+          <h2 style="font-size:17px;font-weight:600;margin:4px 0 8px">Be the rails</h2>
+          <div class="bignum" style="color:var(--rails)" id="close-m2">—</div>
+          <p class="small muted" style="margin:8px 0 12px">
+            Platform fee accrued from partner freight this session. No operational risk, no
+            headcount per shipment, and it compounds with every forwarder that joins.
+          </p>
+          <div id="close-m2-detail"></div>
+        </div>
+      </div>
+
+      <div class="panel" style="margin-bottom:16px">
+        <div class="panel-head"><div><div class="eyebrow">Where the money goes</div><h2>What the raise buys</h2></div></div>
+        <div class="grid g3" id="close-use"></div>
+      </div>
+
+      <div class="panel center" style="padding:26px">
+        <div class="eyebrow" style="justify-content:center">Session summary</div>
+        <p style="max-width:64ch;margin:10px auto 16px;color:var(--t2);font-size:13.5px">
+          You signed in, priced a corridor against real rate cards, booked it, moved it through
+          customs on SARS arithmetic, invoiced it, reconciled the payment, watched the shipper see
+          the same cargo in its own words, and watched a partner's freight pay a toll — all from
+          one event log.
+        </p>
+        <div class="grid g4" id="close-tiles"></div>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<div class="statusbar" role="status">
+  <span class="sb-item"><span class="sb-k">Events</span><span class="sb-v" id="sb-events">0</span></span>
+  <span class="sb-item"><span class="sb-k">Shipment</span><span class="sb-v" id="sb-status">—</span></span>
+  <span class="sb-item"><span class="sb-k">Freight margin</span><span class="sb-v accent" id="sb-margin">—</span></span>
+  <span class="sb-item"><span class="sb-k">Platform fees</span><span class="sb-v rails" id="sb-fees">—</span></span>
+  <span class="sb-nav">
+    <button class="btn ghost sm" id="prev-btn">&larr; Back</button>
+    <button class="btn primary sm" id="next-btn">Continue &rarr;</button>
+  </span>
+</div>

@@ -66,10 +66,12 @@ topic (keyed by shipment for per-shipment ordering).
 | `packages/events` | Versioned canonical event catalogue — the spine of the system |
 | `packages/db` | Drizzle schema, migrations, seed (projections + append-only `events`) |
 | `packages/ontology-bridge` | Freight event → Revenue Ontology mapper (see `docs/ontology-bridge.md`) |
-| `apps/api` | NestJS modular monolith — quoting, bookings, shipments, tracking ingest (DCSA/Traccar/EDIFACT), documents (Claude extraction), customs, compliance, billing + finance views |
+| `apps/api` | NestJS modular monolith — quoting, bookings, shipments, tracking ingest (DCSA/Traccar/EDIFACT), documents (Claude extraction), customs, compliance, billing (standardised invoice + four-way audit) and the external-system seams |
 | `apps/worker` | Temporal worker — shipment lifecycle workflow (time-based exception escalation) |
-| `apps/web` | Operator console — quoting, shipments, ops kanban, customs, documents, invoices, finance views, parties, system monitor |
+| `apps/web` | Operator console — quoting, shipments, ops kanban, customs, documents, invoices, invoice audit, billing settings, finance views, parties, external systems, system monitor |
+| `demo/` | Investor walkthrough — one self-contained HTML file, `python3 demo/build.py` |
 | `docs/architecture.md` | Architecture, non-negotiables, milestone plan |
+| `docs/INTEGRATIONS.md` | Every external system, what it degrades to, and the accreditations required |
 | `LAUNCH.md` | Production readiness checklist — what's done, what's deferred, operator setup steps |
 
 ## Deploying
