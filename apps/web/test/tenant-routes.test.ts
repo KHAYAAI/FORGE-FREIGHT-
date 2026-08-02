@@ -72,3 +72,20 @@ describe("homeFor", () => {
     }
   });
 });
+
+describe("the billing and integrations screens", () => {
+  it("keeps them operational — a customer has no billing profile of its own", () => {
+    // The customer portal shows a shipper its own invoices; it never shows the
+    // forwarder's numbering, bank details or audit findings.
+    for (const path of [
+      "/billing/settings",
+      "/billing/exceptions",
+      "/integrations",
+      "/invoices/abc-123",
+    ]) {
+      expect(mayVisit("CUSTOMER", path)).toBe(false);
+      expect(mayVisit("OPERATOR", path)).toBe(true);
+      expect(mayVisit("PARTNER_AGENT", path)).toBe(true);
+    }
+  });
+});

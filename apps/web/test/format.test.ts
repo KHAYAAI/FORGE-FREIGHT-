@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fmtDate, money, relativeTime } from "@/lib/format";
+import { cbm, fmtDate, fmtDay, kg, money, relativeTime } from "@/lib/format";
 
 afterEach(() => vi.useRealTimers());
 
@@ -70,5 +70,32 @@ describe("relativeTime", () => {
 
   it("shows an em dash for a missing timestamp", () => {
     expect(relativeTime(null)).toBe("—");
+  });
+});
+
+describe("fmtDay", () => {
+  it("formats in UTC with no locale involved", () => {
+    // An invoice dated the 1st in Durban must not read as the 31st for someone
+    // opening it in São Paulo, and it must read identically on the server, in
+    // the browser and in a PDF.
+    expect(fmtDay("2026-08-02T00:30:00.000Z")).toBe("02 Aug 2026");
+    expect(fmtDay("2026-08-01T23:30:00.000Z")).toBe("01 Aug 2026");
+    expect(fmtDay("2026-01-09T12:00:00.000Z")).toBe("09 Jan 2026");
+    expect(fmtDay("2026-12-31T23:59:59.000Z")).toBe("31 Dec 2026");
+  });
+
+  it("shows an em dash for a missing date", () => {
+    expect(fmtDay(null)).toBe("—");
+    expect(fmtDay(undefined)).toBe("—");
+  });
+});
+
+describe("kg and cbm", () => {
+  it("groups thousands and fixes the precision", () => {
+    expect(kg(8_400_000)).toBe("8,400.0 kg");
+    expect(kg(1_260)).toBe("1.3 kg");
+    expect(kg(0)).toBe("0.0 kg");
+    expect(cbm(40_320_000)).toBe("40.320 m³");
+    expect(cbm(0)).toBe("0.000 m³");
   });
 });

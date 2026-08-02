@@ -537,6 +537,200 @@ fastest available transit named in the message, booked it, and found the cargo
 on the shipment screen. 18 new integration tests and 20 new unit tests over the
 arithmetic itself.
 
+## The standardised freight-forwarder invoice, and the audit over it (this round)
+
+The platform could bill a shipment. It could not produce a document another
+company would want to send under its own name, and it had no answer to the
+question a forwarder's customer actually asks: *what am I paying you for, and is
+this number right?*
+
+An invoice was a total, a due date and a currency. Charges were a code, a
+description and two amounts. That is a ledger entry, not a billing document —
+and it is nowhere near enough for a platform other companies bill from.
+
+### What a forwarder invoice actually is
+
+A consolidated **multi-party** billing document. The forwarder pays the carrier,
+the origin agent, the terminal, the customs broker and the authority, then bills
+the customer for the lot. Some lines pass through at cost, some carry a margin,
+some are the forwarder's own service with no third-party cost behind them — and
+nothing on a conventional invoice tells them apart.
+
+Two documents get confused with it constantly, and the confusion is expensive:
+a **commercial invoice** states the value of the *goods* and is what customs
+assesses duty on; a **bill of lading** is the contract of carriage and, when
+negotiable, a document of title. A forwarder invoice used as either one is a
+customs valuation problem rather than a billing one. Every document this
+platform issues now says so on its face.
+
+### The taxonomy (`charge-codes.ts`)
+
+29 canonical codes across 11 categories — origin, main carriage, fuel and
+currency surcharges, destination and port, customs, duties and taxes,
+documentation, demurrage and detention, insurance, platform fees, other — each
+carrying the basis it is billed on, whether it is taxable, and **how often it is
+wrong**. `BAF`, `THC` and `DOC` are marked HIGH, because those three receive the
+least scrutiny from accounts payable and leave the most discretion to whoever
+raised the line.
+
+Vendor dialects collapse onto it before anything is compared: `OHC`, `OTHC`,
+`Origin Handling`, `ORIG.HANDLING CHG` are one code with four spellings, and
+until they are one code you cannot compare two vendors or match a line to a
+contract. Each tenant can add its own aliases, which beat the built-in list.
+Nothing is ever dropped — an unrecognised code lands in `MSC` **visibly**, and
+the audit says the line is unauditable rather than passing it.
+
+Every automatically-accrued charge now carries the taxonomy too. Left on the
+column defaults, a lifecycle-accrued line would claim to be an uncategorised
+charge the forwarder originated with no cost behind it — which is precisely the
+shape the audit is built to pass.
+
+### Per-line provenance
+
+`PASS_THROUGH` / `MARKED_UP` / `FORWARDER_ORIGINATED`, on every line, with the
+subtotal split three ways on the document. No forwarder invoice in the wild
+carries this field. It makes margin explicable instead of something a customer
+guesses at, and it tells the audit which lines can be matched against a vendor
+invoice at all — a pass-through line with a margin on it is refused at the API,
+not discovered later.
+
+### The document (`invoice-document.ts`, pure)
+
+Issuer block with registration, VAT number and **SARS customs client number**;
+bill-to block; the shipment with its bill of lading, carrier booking and
+container numbers; the cargo summary; charges grouped in the order the trade
+reads them with per-section subtotals; per-line VAT (duty and import VAT stay
+outside its scope, because charging output tax on a recovered statutory amount
+overstates the invoice and the issuer's own VAT return together); bank details;
+payment terms; and the notice distinguishing it from a commercial invoice and a
+bill of lading.
+
+**Multi-company from the ground up.** `tenant_billing_profiles` gives every
+company its own legal identity, registrations, bank account, footer, VAT rate,
+default terms and **its own gapless numbering series** — a column incremented
+with `update ... returning` inside the issuing transaction, not a shared
+sequence, because several jurisdictions require an issuer's numbering to be
+sequential and gapless and a shared sequence hands company B the numbers company
+A did not use. Issuer and bill-to are **snapshotted onto the invoice**: a
+company that changes its bank account tomorrow must not change what today's
+invoice says.
+
+### The four-way match (`invoice-audit.ts`, pure)
+
+Most AP teams run a two-way match — invoice against quote total — which catches
+nothing, because the discrepancies live inside lines that were never quoted.
+Every line is now checked against four sources:
+
+1. **The contract** — the accepted quote's own lines, not the rate card. The
+   quote is what this customer was sold, at the margin that applied on the day,
+   and it is the document they would produce in a dispute.
+2. **Vendor cost or a published benchmark** — the recorded buy, or a fuel index.
+3. **The shipment's own facts** — container count, document count, weights.
+4. **The service event record** — did the thing being billed for happen.
+
+Sixteen rules, among them: contract rate variance; margin on a pass-through
+disbursement (critical); VAT charged on an amount outside its scope; a
+per-container charge billed once on a two-container booking; a documentation fee
+billed per container instead of per bill of lading; a delivery charge on a
+container that never left the terminal; demurrage days recomputed from free time
+and the gate clock; demurrage and detention counting the same days; duplicate
+lines; and totals that do not equal the lines under them.
+
+**`matchDepth` is reported on every audit.** "No exceptions found" against one
+source is a different claim from the same words against four, and conflating
+them is how an audit becomes theatre. The console renders the missing sources as
+prominently as the findings.
+
+Findings persist as `invoice_exceptions`, upserted on re-run so opening the
+screen twice does not double the list, and **a human's decision survives the
+next run** — accepting or querying a finding is not reset by a re-audit.
+Querying a line marks the charge, and the document holds that amount back from
+the balance while still showing it: netting it off would quietly reissue the
+invoice.
+
+A **dispute packet** generates from the open findings as plain text ready to
+paste into an email, with the days remaining in the window on its face. Disputes
+are worth nothing after the window closes, and month-end is after the window
+closes.
+
+### Compliance and the external systems, stated honestly
+
+Half the value chain is somebody else's system, and several of those cannot be
+switched on with a URL. `GET /integrations` and **Compliance → External
+Systems** now enumerate all eleven, each with what it does, what it degrades to,
+the config keys it needs (names only — never values), and the **accreditation**
+a person has to go and get. Six need one.
+
+- **SARS Customs EDI** (`SARS_EDI_URL` + client number + client certificate).
+  Requires the company to be registered with a customs client number and to hold
+  an EDI user profile SARS issues on application — a paper process measured in
+  weeks. Unconfigured, declarations are still **built, validated and stored
+  complete**; they stop at `QUEUED` with the reason on them and export for
+  manual capture. Submissions are idempotent, and a network failure leaves the
+  filing queued rather than rejected, because the declaration may or may not
+  have been lodged and a duplicate customs entry has to be unwound by hand.
+- **SARS eFiling** (`SARS_EFILING_URL`) for VAT201 and deferment statements.
+- **Fuel index** (`FUEL_INDEX_URL`) — Platts, Argus or IATA, all licensed.
+  Unset, the audit raises `FUEL_BENCHMARK_UNAVAILABLE` and states the total left
+  unchecked. It does **not** invent a benchmark: fuel is the highest-error
+  category on the document, and a fabricated figure produces confident findings
+  that collapse the moment a vendor asks where the number came from.
+- **Terminal gate events** (`TERMINAL_EVENTS_URL`) — Navis N4 or carrier
+  equipment history. Unset, demurrage is reported unverifiable rather than
+  passed. The platform's own event log is preferred where carrier tracking has
+  already delivered the milestones.
+
+All four follow the pattern already established by `YENTE_URL` and
+`NOVU_API_KEY`: config-gated, log-and-degrade, never a hard dependency of the
+domain logic. Written up in `docs/INTEGRATIONS.md`.
+
+### Console
+
+- **Invoice document** at `/invoices/:id` — the full document, with the audit
+  beneath it on the same page. Separating "the invoice" from "is the invoice
+  right" is exactly what produces a process where the first is sent and the
+  second happens after the dispute window shuts.
+- **Billing settings** — the company's identity, bank details, numbering and
+  terms, with what is still missing reported both here and on the invoice
+  itself. Saved in pieces, because onboarding a forwarder takes days and a form
+  that refuses a partial save is a form people fill with placeholder text.
+- **Invoice exceptions** — the portfolio view, grouped by rule and ordered by
+  money. A R40 terminal-handling overcharge on one container is beneath anyone's
+  review threshold; the same R40 on every container through one port for a year
+  is the largest single recoverable number a forwarder has, and it is invisible
+  from invoice-level review.
+- **External systems** — integration status and the SARS filing queue.
+
+### Found by running it, not by testing it
+
+The quote engine emits `THC-D`, `TOLL` and `PLATFORM_FEE`; the taxonomy had none
+of them and every one fell through to `MSC`. It surfaced on the first live
+invoice, not in any unit test, because the tests used the codes the taxonomy
+already knew. Added as aliases, plus a proper `TOL` code for road tolls.
+
+Two nullable-column unique indexes would have been silent no-ops: `NULL` never
+equals `NULL` in Postgres, so a three-column unique index over a nullable
+`charge_id` would have let every audit re-run insert another copy of exactly the
+findings that matter most — the invoice-level ones. Split into two partial
+indexes.
+
+### Verified live
+
+Quoted a real consignment, booked it, added seven charge lines across seven
+categories, issued `FF-2026-000001` under the seeded company's own numbering,
+read the document (VAT correct per line, duty zero-rated, subtotal split
+30,290 / 0 / 3,650 across the three provenances), ran the audit against all four
+sources, and got eight findings — including the documentation fee billed per
+container rather than per bill of lading, and the two lines nobody could check
+because the fuel index and the terminal feed are not configured, each naming the
+variable that would enable it. Generated the dispute packet. Lodged a SARS
+filing with the channel unconfigured and watched it queue with the reason
+attached rather than fail.
+
+Full gate green: lint, typecheck, build, **317 unit tests + 93 integration
+tests** — 203 in the API, 102 in the console, 12 across the packages. 59 of the
+unit tests and 19 of the integration tests are new this round.
+
 ## Must do before going live (operator action, not code)
 
 These aren't code gaps — they're steps whoever deploys this has to take
@@ -591,7 +785,28 @@ provision on its own:
    `infra/aws`, or `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` elsewhere).
 8. **DNS + CORS**: set `CORS_ORIGINS` and `PORTAL_ORIGIN` to the real
    production domain before cutover — they default to `localhost`.
-9. **Optional integrations, if you want them live at launch**: `AISSTREAM_API_KEY`
+9. **Each company's billing profile**: before a tenant issues its first
+   invoice, fill in **Finance → Billing Settings** — legal name, company
+   registration, VAT number, SARS customs client number, registered address,
+   bank account and numbering prefix. The platform will invoice without them
+   and says on the document exactly what is missing, but an invoice with no
+   bank account on it is one the customer cannot pay. Nothing here is shared
+   between companies.
+10. **SARS accreditation** (only if you want filings lodged electronically):
+   the operating company must be registered with SARS as an importer, exporter
+   or clearing agent with a customs client number, then apply for an EDI user
+   profile and be issued a client certificate for the gateway. That is a paper
+   process measured in weeks, and no code path shortens it. Until then
+   declarations are built, validated and stored complete, and stop at `QUEUED`
+   for manual capture — which is a working state, not a broken one. See
+   `docs/INTEGRATIONS.md`.
+11. **Invoice audit references**, if you want the four-way match running at
+   full depth: `FUEL_INDEX_URL` needs a Platts/Argus/IATA data licence, and
+   `TERMINAL_EVENTS_URL` needs a per-terminal or per-carrier data agreement.
+   Without them the audit still runs against the contract and the shipment
+   data, and reports on each affected invoice which checks it could not
+   perform — it never passes a line it could not validate.
+12. **Optional integrations, if you want them live at launch**: `AISSTREAM_API_KEY`
    (aisstream.io account) for live vessel positions, `NOVU_API_KEY` +
    a workflow named to match `NOVU_WORKFLOW_ID` configured in the Novu
    dashboard with the WhatsApp/SMS/email channels you actually want, and

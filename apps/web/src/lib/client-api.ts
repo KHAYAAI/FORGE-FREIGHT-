@@ -17,6 +17,11 @@ import type {
   PaymentResult,
   RateCard,
   RateSurcharge,
+  AuditResult,
+  BillingProfile,
+  DisputePacket,
+  ExceptionRow,
+  ExceptionStatus,
 } from "./types";
 
 /** Client-side counterpart to lib/api.ts — goes through /api/proxy (same-origin, no CORS). */
@@ -123,6 +128,17 @@ export const clientApi = {
     post<PaymentResult>(`/invoices/${invoiceId}/payments`, body),
   listPayments: (invoiceId: string) => get<Payment[]>(`/invoices/${invoiceId}/payments`),
   financeViews: () => get<FinanceViews>("/finance/views"),
+
+  // The four-way match. A POST because the findings are persisted and a human
+  // then acts on their status.
+  auditInvoice: (invoiceId: string) => post<AuditResult>(`/invoices/${invoiceId}/audit`),
+  invoiceExceptions: (invoiceId: string) => get<ExceptionRow[]>(`/invoices/${invoiceId}/exceptions`),
+  resolveException: (id: string, status: ExceptionStatus, note?: string) =>
+    patch<ExceptionRow["exception"]>(`/billing/exceptions/${id}`, { status, note: note ?? null }),
+  disputePacket: (invoiceId: string) => get<DisputePacket>(`/invoices/${invoiceId}/dispute-packet`),
+
+  updateBillingProfile: (body: Record<string, unknown>) =>
+    patch<BillingProfile>("/billing/profile", body),
 
   createPartner: (body: { name: string; platformFeeBps: number }) =>
     post<Partner>("/tenants/partners", body),

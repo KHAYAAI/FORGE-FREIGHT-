@@ -67,6 +67,43 @@ const ConfigSchema = z
     /** How often to refresh the set of vessel IMOs to subscribe to. */
     AIS_VESSEL_REFRESH_MS: z.coerce.number().int().min(10_000).default(60_000),
 
+    // -- Statutory filing -----------------------------------------------------
+    // EXTERNAL API. SARS Customs EDI: declarations (CUSDEC) go over the SARS
+    // gateway and responses (CUSRES) come back on the same channel. Reaching it
+    // needs three things this platform cannot supply — a customs client number,
+    // an EDI user profile issued by SARS, and a client certificate for mutual
+    // TLS. Unset, filings are still built, validated and stored; they stop at
+    // QUEUED and the console says what is missing.
+    /** SARS Customs EDI gateway base URL. Empty = filings queue locally. */
+    SARS_EDI_URL: z.string().default(""),
+    /** The 8-digit customs client number the operator is registered under. */
+    SARS_CLIENT_NUMBER: z.string().default(""),
+    /** PEM path for the client certificate SARS issues for the EDI channel. */
+    SARS_CLIENT_CERT_PATH: z.string().default(""),
+    SARS_CLIENT_KEY_PATH: z.string().default(""),
+    /** SARS eFiling (VAT201, deferment statements). Empty = manual filing. */
+    SARS_EFILING_URL: z.string().default(""),
+
+    // -- Invoice audit references --------------------------------------------
+    /**
+     * EXTERNAL API. Bunker/jet fuel index feed used to validate BAF, EBS and
+     * CAF lines — Platts or Argus for bunker, IATA for jet fuel, or a carrier's
+     * published tariff. All are licensed. Empty = the fuel rule does not run
+     * and the audit says so rather than inventing a benchmark.
+     */
+    FUEL_INDEX_URL: z.string().default(""),
+    FUEL_INDEX_API_KEY: z.string().default(""),
+    /** How stale an index quote may be before the audit stops trusting it. */
+    FUEL_INDEX_MAX_AGE_HOURS: z.coerce.number().int().min(1).default(72),
+    /**
+     * EXTERNAL API. Terminal gate-in/gate-out timestamps, needed to recompute
+     * demurrage and detention from free time. Sources are the terminal
+     * operating system (Navis N4 and similar) or the carrier's track-and-trace.
+     * Empty = demurrage lines are reported as unverifiable rather than passed.
+     */
+    TERMINAL_EVENTS_URL: z.string().default(""),
+    TERMINAL_EVENTS_API_KEY: z.string().default(""),
+
     /** Novu API key. Empty = milestone notifications disabled (logged only). */
     NOVU_API_KEY: z.string().default(""),
     NOVU_WORKFLOW_ID: z.string().default("shipment-milestone"),

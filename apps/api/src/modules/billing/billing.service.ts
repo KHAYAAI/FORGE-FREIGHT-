@@ -10,6 +10,7 @@ import {
   charges,
   invoices,
   ledgerEvents,
+  parties,
   payments,
   shipments,
   type Db,
@@ -22,20 +23,35 @@ import {
 } from "@forge-freight/events";
 import { DB } from "../db/db.module.js";
 import { appendEvent } from "../db/event-store.js";
+import { BillingProfileService } from "./billing-profile.service.js";
+import { lineVatCents } from "./invoice-document.js";
 
 @Injectable()
 export class BillingService {
-  constructor(@Inject(DB) private readonly db: Db) {}
+  constructor(
+    @Inject(DB) private readonly db: Db,
+    @Inject(BillingProfileService) private readonly profiles: BillingProfileService,
+  ) {}
 
   /**
    * Issue an invoice from a shipment's uninvoiced charges. One currency per
    * invoice — mixed-currency shipments produce one invoice per currency.
+   *
+   * The document is finalised here, not rendered later: the issuer's and
+   * customer's details are snapshotted onto the invoice, VAT is computed per
+   * line from the taxonomy, and the number is drawn from the issuing company's
+   * own gapless series. A company that changes its bank account tomorrow must
+   * not change what today's invoice says.
    */
   async issueInvoices(params: {
     shipmentId: string;
     tenantId: string;
     actor: EventActor;
     paymentTermsDays?: number;
+    /** Bill of lading / air waybill, carried onto the document for matching. */
+    transportDocumentRef?: string | null;
+    /** The customer's own PO — the field their AP team matches on. */
+    customerReference?: string | null;
   }) {
     const [shipment] = await this.db
       .select()
@@ -70,16 +86,65 @@ export class BillingService {
       byCurrency.set(charge.currency, list);
     }
 
-    const dueDate = new Date(
-      Date.now() + (params.paymentTermsDays ?? 30) * 86_400_000,
-    );
-    const issued: Array<{ invoiceId: string; number: string; totalCents: number; currency: string }> = [];
+    const profile = await this.profiles.ensure(params.tenantId);
+    const termsDays = params.paymentTermsDays ?? profile.defaultPaymentTermsDays;
+    const issuedAt = new Date();
+    const dueDate = new Date(issuedAt.getTime() + termsDays * 86_400_000);
+
+    const [customer] = await this.db
+      .select()
+      .from(parties)
+      .where(eq(parties.id, customerId));
+
+    const issuerSnapshot = {
+      legalName: profile.legalName,
+      tradingName: profile.tradingName,
+      registrationNumber: profile.registrationNumber,
+      vatNumber: profile.vatNumber,
+      customsClientNumber: profile.customsClientNumber,
+      addressLines: profile.addressLines,
+      country: profile.country,
+      email: profile.email,
+      phone: profile.phone,
+      logoUrl: profile.logoUrl,
+      bankName: profile.bankName,
+      bankAccountName: profile.bankAccountName,
+      bankAccountNumber: profile.bankAccountNumber,
+      bankBranchCode: profile.bankBranchCode,
+      bankSwift: profile.bankSwift,
+      invoiceFooter: profile.invoiceFooter,
+    };
+    const billToSnapshot = {
+      name: customer?.name ?? "Customer",
+      addressLines: customer?.address ?? null,
+      country: customer?.country ?? null,
+      taxId: customer?.taxId ?? null,
+      email: customer?.email ?? null,
+    };
+
+    const issued: Array<{
+      invoiceId: string;
+      number: string;
+      subtotalCents: number;
+      vatCents: number;
+      totalCents: number;
+      currency: string;
+    }> = [];
 
     for (const [currency, group] of byCurrency) {
       const invoiceId = randomUUID();
-      const total = group.reduce((sum, c) => sum + c.sellCents, 0);
+      const subtotal = group.reduce((sum, c) => sum + c.sellCents, 0);
+      // VAT per line, from the rate stored on the charge. A pass-through
+      // disbursement carries 0 and must: charging VAT on a recovered statutory
+      // amount overstates the invoice and the issuer's output tax together.
+      const vat = group.reduce((sum, c) => sum + lineVatCents(c.sellCents, c.vatBps), 0);
+      const disbursements = group
+        .filter((c) => c.provenance === "PASS_THROUGH")
+        .reduce((sum, c) => sum + c.sellCents, 0);
+      const total = subtotal + vat;
 
       await this.db.transaction(async (tx) => {
+        const number = await this.profiles.nextNumber(tx as unknown as Db, params.tenantId, issuedAt);
         const [inv] = await tx
           .insert(invoices)
           .values({
@@ -87,10 +152,18 @@ export class BillingService {
             tenantId: params.tenantId,
             customerId,
             shipmentId: params.shipmentId,
-            number: sql`'INV-' || to_char(now(), 'YYYY') || '-' || lpad(nextval('shipment_ref_seq')::text, 6, '0')` as never,
+            number,
+            subtotalCents: subtotal,
+            vatCents: vat,
+            disbursementCents: disbursements,
             totalCents: total,
             currency,
             dueDate,
+            paymentTermsDays: termsDays,
+            issuerSnapshot,
+            billToSnapshot,
+            transportDocumentRef: params.transportDocumentRef ?? null,
+            customerReference: params.customerReference ?? null,
           })
           .returning({ number: invoices.number });
 
@@ -121,6 +194,8 @@ export class BillingService {
         issued.push({
           invoiceId,
           number: inv!.number,
+          subtotalCents: subtotal,
+          vatCents: vat,
           totalCents: total,
           currency,
         });

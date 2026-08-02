@@ -23,6 +23,14 @@ import type {
   SystemMonitor,
   Tenant,
   Charge,
+  AuditResult,
+  BillingProfile,
+  ChargeCodeDef,
+  DisputePacket,
+  ExceptionRow,
+  FilingsView,
+  IntegrationsOverview,
+  InvoiceDocument,
 } from "./types";
 
 /**
@@ -204,6 +212,24 @@ export const api = {
     body: { amountCents: number; currency: string; paymentRef: string },
   ) => apiPost<Invoice>(`/invoices/${invoiceId}/payments`, body),
   financeViews: () => apiGet<FinanceViews>("/finance/views"),
+
+  // The standardised invoice document, and the audit over it.
+  invoiceDocument: (id: string) => apiGet<InvoiceDocument>(`/invoices/${id}/document`),
+  auditInvoice: (id: string) => apiPost<AuditResult>(`/invoices/${id}/audit`),
+  invoiceExceptions: (id: string) => apiGet<ExceptionRow[]>(`/invoices/${id}/exceptions`),
+  allExceptions: () => apiGet<ExceptionRow[]>("/billing/exceptions"),
+  disputePacket: (id: string) => apiGet<DisputePacket>(`/invoices/${id}/dispute-packet`),
+
+  // The issuing company's own invoice identity.
+  billingProfile: () => apiGet<BillingProfile>("/billing/profile"),
+  chargeCodes: () =>
+    apiGet<{ codes: ChargeCodeDef[]; categories: { code: string; label: string }[] }>(
+      "/billing/charge-codes",
+    ),
+
+  // What this deployment can and cannot reach.
+  integrations: () => apiGet<IntegrationsOverview>("/integrations"),
+  filings: () => apiGet<FilingsView>("/compliance/filings"),
   platformFees: () => apiGet<PlatformFees>("/billing/platform-fees"),
 
   // System

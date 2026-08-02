@@ -11,6 +11,7 @@ import { DbModule } from "./modules/db/db.module.js";
 import { DocumentsModule } from "./modules/documents/documents.module.js";
 import { HealthModule } from "./modules/health/health.module.js";
 import { IngestModule } from "./modules/ingest/ingest.module.js";
+import { IntegrationsModule } from "./modules/integrations/integrations.module.js";
 import { OutboxModule } from "./modules/outbox/outbox.module.js";
 import { ProjectorModule } from "./modules/projector/projector.module.js";
 import { QuotingModule } from "./modules/quoting/quoting.module.js";
@@ -42,6 +43,7 @@ import { TenantsModule } from "./modules/tenants/tenants.module.js";
     ShipmentsModule,
     IngestModule,
     ComplianceModule,
+    IntegrationsModule,
     BillingModule,
     CustomsModule,
     DocumentsModule,

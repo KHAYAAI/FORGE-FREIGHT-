@@ -4,6 +4,7 @@ import {
   parties,
   rateCards,
   rateSurcharges,
+  tenantBillingProfiles,
   tenants,
 } from "./schema.js";
 
@@ -166,6 +167,34 @@ async function main() {
       minMarginCents: 1000_00,
     },
   ]);
+
+  // The operator's own invoice identity. Every company on the platform issues
+  // under its own registration, numbering and bank account — this is the seed
+  // tenant's, not a platform default, and a second forwarder onboarding gets
+  // its own from the billing settings screen.
+  await db.insert(tenantBillingProfiles).values({
+    tenantId: operator.id,
+    legalName: "FORGE Freight (Pty) Ltd",
+    tradingName: "FORGE Freight",
+    registrationNumber: "2019/447281/07",
+    vatNumber: "4820291837",
+    customsClientNumber: "20418877",
+    addressLines: "Unit 7, Bayhead Business Park\n14 Langeberg Road\nBayhead, Durban 4001",
+    country: "ZA",
+    email: "billing@forgefreight.example",
+    phone: "+27 31 100 4400",
+    bankName: "Standard Bank",
+    bankAccountName: "FORGE Freight (Pty) Ltd",
+    bankAccountNumber: "042 118 774",
+    bankBranchCode: "051001",
+    bankSwift: "SBZAZAJJ",
+    invoiceNumberPrefix: "FF",
+    defaultPaymentTermsDays: 30,
+    defaultCurrency: "ZAR",
+    vatBps: 1500,
+    invoiceFooter:
+      "Payment strictly per terms. Queries must be raised within 14 days of invoice date, quoting the invoice number and shipment reference.",
+  });
 
   console.log("Seeded:", {
     operator: operator.id,

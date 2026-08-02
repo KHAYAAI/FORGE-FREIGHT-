@@ -5,10 +5,12 @@ import {
   charges,
   quoteLines,
   shipments,
+  tenantBillingProfiles,
   tenants,
   type Db,
 } from "@forge-freight/db";
 import { ChargeAccrued, makeEvent } from "@forge-freight/events";
+import { chargeMetadata } from "../billing/charge-codes.js";
 import { appendEvent } from "../db/event-store.js";
 import type { EventHandler, StoredEvent } from "./event-dispatcher.service.js";
 
@@ -72,6 +74,14 @@ export class BillingAccrual implements EventHandler {
       .from(quoteLines)
       .where(eq(quoteLines.quoteId, booking.quoteId));
 
+    // The issuing company's own VAT rate. A tenant with no profile yet bills
+    // at zero rather than at somebody else's rate.
+    const [profileRow] = await db
+      .select({ vatBps: tenantBillingProfiles.vatBps })
+      .from(tenantBillingProfiles)
+      .where(eq(tenantBillingProfiles.tenantId, shipment.tenantId));
+    const profile = { vatBps: profileRow?.vatBps ?? 0 };
+
     // Sell total by currency, for the platform fee below — computed while
     // accruing the quoted lines so a mixed-currency quote fees each currency
     // on its own total rather than mixing them.
@@ -85,13 +95,28 @@ export class BillingAccrual implements EventHandler {
         (sellTotalsByCurrency.get(line.currency) ?? 0) + sellCents,
       );
       await db.transaction(async (tx) => {
+        // The taxonomy fields come from the code itself. Left on the column
+        // defaults, every automatically-accrued line would claim to be an
+        // uncategorised charge the forwarder originated with no underlying
+        // cost — which is exactly the shape the audit is built to pass.
+        const meta = chargeMetadata(line.chargeCode, {
+          vatBps: profile.vatBps,
+          provenance: line.buyCents > 0 ? "MARKED_UP" : "FORWARDER_ORIGINATED",
+        });
         await tx.insert(charges).values({
           id: chargeId,
           tenantId: shipment.tenantId,
           shipmentId,
-          chargeCode: line.chargeCode,
+          chargeCode: meta.chargeCode,
           description: line.description,
-          kind: line.chargeCode === "FRT" ? "FREIGHT" : "SURCHARGE",
+          kind: meta.kind,
+          category: meta.category,
+          provenance: meta.provenance,
+          basis: meta.basis,
+          quantity: line.quantity,
+          unitSellCents: line.sellCents,
+          vatBps: meta.vatBps,
+          contractRef: `Accepted quote ${booking.quoteId}`,
           buyCents: line.buyCents * line.quantity,
           sellCents,
           currency: line.currency,
@@ -148,9 +173,14 @@ export class BillingAccrual implements EventHandler {
           id: chargeId,
           tenantId,
           shipmentId,
-          chargeCode: "PLATFORM_FEE",
+          chargeCode: "PLF",
           description: `Platform fee (${tenant.platformFeeBps! / 100}% of freight)`,
           kind: "FEE",
+          category: "PLATFORM_FEE",
+          provenance: "FORWARDER_ORIGINATED",
+          basis: "PERCENTAGE",
+          quantity: 1,
+          unitSellCents: feeCents,
           buyCents: null,
           sellCents: feeCents,
           currency,
@@ -192,9 +222,18 @@ export class BillingAccrual implements EventHandler {
         id: chargeId,
         tenantId: event.tenantId,
         shipmentId,
-        chargeCode: "DUTY",
+        chargeCode: "DTY",
         description: "Customs duties and VAT (disbursement at cost)",
         kind: "DISBURSEMENT",
+        category: "DUTY_TAX",
+        provenance: "PASS_THROUGH",
+        basis: "PER_SHIPMENT",
+        quantity: 1,
+        unitSellCents: total,
+        // Duty and import VAT recovered at cost are outside the scope of VAT.
+        // Charging output tax on them overstates the invoice and the issuer's
+        // own VAT return together.
+        vatBps: 0,
         buyCents: total,
         sellCents: total,
         currency: duties.currency,

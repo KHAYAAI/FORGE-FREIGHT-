@@ -470,3 +470,285 @@ export interface ConsignmentReference {
   urgencies: { code: UrgencyCode; upliftBps: number; maxTransitDays: number | null; label: string }[];
   volumetricDivisors: Record<TransportMode, number>;
 }
+
+// ---------------------------------------------------------------------------
+// The standardised freight-forwarder invoice
+// ---------------------------------------------------------------------------
+
+export type ChargeCategory =
+  | "ORIGIN"
+  | "FREIGHT"
+  | "FUEL_SURCHARGE"
+  | "DESTINATION"
+  | "CUSTOMS"
+  | "DUTY_TAX"
+  | "DOCUMENTATION"
+  | "DEMURRAGE_DETENTION"
+  | "INSURANCE"
+  | "PLATFORM_FEE"
+  | "OTHER";
+
+export type ChargeProvenance = "PASS_THROUGH" | "MARKED_UP" | "FORWARDER_ORIGINATED";
+
+export type ChargeBasis =
+  | "PER_SHIPMENT"
+  | "PER_CONTAINER"
+  | "PER_KG"
+  | "PER_CBM"
+  | "PER_DOCUMENT"
+  | "PER_DAY"
+  | "PERCENTAGE";
+
+export interface ChargeCodeDef {
+  code: string;
+  label: string;
+  category: ChargeCategory;
+  kind: string;
+  basis: ChargeBasis;
+  typicalProvenance: ChargeProvenance;
+  taxable: boolean;
+  errorRate: "LOW" | "MEDIUM" | "HIGH";
+  note?: string;
+  aliases: string[];
+}
+
+export interface InvoiceIssuer {
+  legalName: string;
+  tradingName?: string | null;
+  registrationNumber?: string | null;
+  vatNumber?: string | null;
+  customsClientNumber?: string | null;
+  addressLines?: string | null;
+  country: string;
+  email?: string | null;
+  phone?: string | null;
+  logoUrl?: string | null;
+  bankName?: string | null;
+  bankAccountName?: string | null;
+  bankAccountNumber?: string | null;
+  bankBranchCode?: string | null;
+  bankSwift?: string | null;
+  invoiceFooter?: string | null;
+}
+
+export interface InvoiceBillTo {
+  name: string;
+  addressLines?: string | null;
+  country?: string | null;
+  taxId?: string | null;
+  email?: string | null;
+  contact?: string | null;
+}
+
+export interface InvoiceDocumentLine {
+  id: string;
+  chargeCode: string;
+  codeLabel: string;
+  description: string;
+  category: ChargeCategory;
+  provenance: ChargeProvenance;
+  basis: ChargeBasis;
+  quantity: number;
+  unitSellCents: number | null;
+  sellCents: number;
+  buyCents: number | null;
+  currency: string;
+  vatBps: number;
+  vatCents: number;
+  marginCents: number | null;
+  marginBps: number | null;
+  vendorName?: string | null;
+  vendorInvoiceRef?: string | null;
+  contractRef?: string | null;
+  disputed?: boolean;
+}
+
+export interface InvoiceSection {
+  category: ChargeCategory;
+  label: string;
+  lines: InvoiceDocumentLine[];
+  subtotalCents: number;
+  vatCents: number;
+}
+
+export interface InvoiceDocument {
+  number: string;
+  type: "FREIGHT_INVOICE" | "CREDIT_NOTE" | "PROFORMA";
+  typeLabel: string;
+  status: string;
+  currency: string;
+  issueDate: string;
+  dueDate: string;
+  paymentTermsDays: number;
+  paymentTermsLabel: string;
+  issuer: InvoiceIssuer;
+  billTo: InvoiceBillTo;
+  shipment: {
+    reference: string;
+    origin: string;
+    destination: string;
+    mode: string;
+    incoterm?: string | null;
+    transportDocumentRef?: string | null;
+    carrierBookingRef?: string | null;
+    containers?: { number: string | null; type: string | null }[];
+  } | null;
+  cargo: {
+    description: string;
+    cargoType: string;
+    pieces: number;
+    grossWeightGrams: number;
+    volumeCm3: number;
+    chargeableWeightGrams: number;
+    marksAndNumbers?: string | null;
+  } | null;
+  sections: InvoiceSection[];
+  totals: {
+    subtotalCents: number;
+    vatCents: number;
+    totalCents: number;
+    disbursementCents: number;
+    markedUpCents: number;
+    forwarderOriginatedCents: number;
+    paidCents: number;
+    outstandingCents: number;
+    disputedCents: number;
+  };
+  margin: {
+    buyCents: number;
+    sellCents: number;
+    marginCents: number;
+    marginBps: number;
+    linesWithoutBuy: number;
+  };
+  customerReference?: string | null;
+  notes?: string | null;
+  documentNotice: string;
+  currencies: string[];
+  /** What the issuing company still has to fill in on its billing profile. */
+  profileMissing: string[];
+}
+
+export interface BillingProfile {
+  tenantId: string;
+  legalName: string;
+  tradingName: string | null;
+  registrationNumber: string | null;
+  vatNumber: string | null;
+  customsClientNumber: string | null;
+  addressLines: string | null;
+  country: string;
+  email: string | null;
+  phone: string | null;
+  logoUrl: string | null;
+  bankName: string | null;
+  bankAccountName: string | null;
+  bankAccountNumber: string | null;
+  bankBranchCode: string | null;
+  bankSwift: string | null;
+  invoiceNumberPrefix: string;
+  nextInvoiceNumber: number;
+  defaultPaymentTermsDays: number;
+  defaultCurrency: string;
+  vatBps: number;
+  invoiceFooter: string | null;
+  completeness: { ready: boolean; missing: string[] };
+}
+
+export type ExceptionSeverity = "INFO" | "WARN" | "CRITICAL";
+export type ExceptionStatus = "OPEN" | "ACCEPTED" | "DISPUTED" | "RESOLVED";
+
+export interface InvoiceException {
+  id: string;
+  invoiceId: string;
+  chargeId: string | null;
+  code: string;
+  severity: ExceptionSeverity;
+  status: ExceptionStatus;
+  message: string;
+  varianceCents: number | null;
+  evidence: Record<string, unknown> | null;
+  detectedAt: string;
+  resolvedAt: string | null;
+  resolutionNote: string | null;
+}
+
+export interface ExceptionRow {
+  exception: InvoiceException;
+  invoiceNumber: string | null;
+}
+
+export type MatchSource = "CONTRACT" | "VENDOR_COST" | "SHIPMENT_DATA" | "SERVICE_EVENTS";
+
+export interface AuditResult {
+  findings: {
+    code: string;
+    chargeId: string | null;
+    severity: ExceptionSeverity;
+    message: string;
+    varianceCents: number | null;
+    sources: MatchSource[];
+    evidence: Record<string, unknown>;
+  }[];
+  summary: {
+    linesChecked: number;
+    findings: number;
+    criticalCount: number;
+    netVarianceCents: number;
+    matchDepth: Record<MatchSource, boolean>;
+    matchedSources: number;
+  };
+}
+
+export interface DisputePacket {
+  subject: string;
+  body: string;
+  claimedCents: number;
+  lineCount: number;
+}
+
+export interface IntegrationState {
+  key: string;
+  name: string;
+  domain: string;
+  purpose: string;
+  provider: string;
+  requires: string[];
+  optional?: string[];
+  accreditation: string | null;
+  degradesTo: string;
+  requiredForProduction: boolean;
+  status: "CONFIGURED" | "NOT_CONFIGURED" | "PARTIAL";
+  missing: string[];
+  missingOptional: string[];
+}
+
+export interface IntegrationsOverview {
+  integrations: IntegrationState[];
+  summary: {
+    total: number;
+    configured: number;
+    partial: number;
+    notConfigured: number;
+    blockingProduction: string[];
+    needingAccreditation: { name: string; accreditation: string }[];
+  };
+}
+
+export interface ComplianceFiling {
+  id: string;
+  shipmentId: string | null;
+  kind: string;
+  authority: string;
+  status: string;
+  submissionRef: string | null;
+  authorityRef: string | null;
+  lastError: string | null;
+  submittedAt: string | null;
+  createdAt: string;
+}
+
+export interface FilingsView {
+  filings: ComplianceFiling[];
+  channel: { enabled: boolean; missing: string[] };
+}

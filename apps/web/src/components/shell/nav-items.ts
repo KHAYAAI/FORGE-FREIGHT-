@@ -31,8 +31,15 @@ export const NAV_ITEMS: NavItem[] = [
   { href: "/customs", label: "Customs", group: "Compliance", visibleTo: OPERATIONAL },
   { href: "/documents", label: "Documents", group: "Compliance", visibleTo: OPERATIONAL },
   { href: "/parties", label: "Parties", group: "Compliance", visibleTo: OPERATIONAL },
+  // What the platform can and cannot reach outside itself, and the statutory
+  // filings queued behind it. Under Compliance rather than Overview because
+  // the entries that matter most — SARS EDI, the fuel index — are the ones a
+  // compliance lead is chasing paperwork for.
+  { href: "/integrations", label: "External Systems", group: "Compliance", visibleTo: OPERATIONAL },
 
   { href: "/invoices", label: "Invoices", group: "Finance", visibleTo: OPERATIONAL },
+  { href: "/billing/exceptions", label: "Invoice Audit", group: "Finance", visibleTo: OPERATIONAL },
+  { href: "/billing/settings", label: "Billing Settings", group: "Finance", visibleTo: OPERATIONAL },
   { href: "/finance", label: "Finance Views", group: "Finance", visibleTo: OPERATIONAL },
   // Platform fees only mean something for a partner tenant — an operator
   // sees what partners owe via the Partners screen instead.

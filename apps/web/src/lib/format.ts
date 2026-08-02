@@ -45,3 +45,36 @@ export function relativeTime(iso: string | null | undefined): string {
   const d = Math.floor(h / 24);
   return `${d}d ago`;
 }
+
+const MONTHS = [
+  "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+];
+
+/**
+ * A date, with no time and no locale.
+ *
+ * `fmtDate` goes through ICU, which is fine for a screen where the exact
+ * separator does not matter. It is not fine on an invoice: the document is
+ * printed, filed and quoted back months later, and it has to read identically
+ * whether it was rendered on the server, in the browser, or into a PDF.
+ * Formatted in UTC for the same reason — an invoice dated the 1st in Durban
+ * must not become the 31st for a reader in São Paulo.
+ */
+export function fmtDay(iso: string | null | undefined): string {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  return `${String(d.getUTCDate()).padStart(2, "0")} ${MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
+}
+
+/** Kilograms from grams, one decimal, no locale. */
+export function kg(grams: number): string {
+  const n = grams / 1000;
+  const [whole = "0", frac = "0"] = n.toFixed(1).split(".");
+  return `${whole.replace(/\B(?=(\d{3})+(?!\d))/g, ",")}.${frac} kg`;
+}
+
+/** Cubic metres from cubic centimetres, three decimals, no locale. */
+export function cbm(cm3: number): string {
+  return `${(cm3 / 1_000_000).toFixed(3)} m³`;
+}

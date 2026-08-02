@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { clientApi } from "@/lib/client-api";
@@ -86,7 +87,12 @@ function PaymentRow({ invoice }: { invoice: Invoice }) {
     <>
       <TR>
         <TD>
-          <Mono className="text-primary">{invoice.number}</Mono>
+          {/* The number opens the document — the invoice as a customer sees
+              it, with the audit beneath. The table is a worklist; this is the
+              thing being worked on. */}
+          <Link href={`/invoices/${invoice.id}`} className="text-accent hover:underline">
+            <Mono>{invoice.number}</Mono>
+          </Link>
         </TD>
         <TD className="text-secondary">
           {invoice.shipmentId ? <Mono>{invoice.shipmentId.slice(0, 8)}</Mono> : "—"}

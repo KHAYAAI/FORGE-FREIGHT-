@@ -614,6 +614,62 @@ export const chargeKind = pgEnum("charge_kind", [
   "FEE",
 ]);
 
+/**
+ * Where a line sits in the freight-forwarder invoice taxonomy.
+ *
+ * A forwarder invoice is a consolidated billing document: it aggregates what
+ * the carrier, the port agent, the customs broker and the local handler each
+ * charged, plus the forwarder's own fees. Grouping by `kind` alone (FREIGHT /
+ * SURCHARGE / DISBURSEMENT / FEE) says how a line behaves for tax, not what it
+ * is for — and "what is it for" is the axis every audit runs on. The three
+ * categories with the highest documented error rates are FUEL_SURCHARGE,
+ * DESTINATION (terminal handling) and DOCUMENTATION, precisely because they
+ * receive the least scrutiny and carry the most forwarder discretion.
+ */
+export const chargeCategory = pgEnum("charge_category", [
+  "ORIGIN",
+  "FREIGHT",
+  "FUEL_SURCHARGE",
+  "DESTINATION",
+  "CUSTOMS",
+  "DUTY_TAX",
+  "DOCUMENTATION",
+  "DEMURRAGE_DETENTION",
+  "INSURANCE",
+  "PLATFORM_FEE",
+  "OTHER",
+]);
+
+/**
+ * How the forwarder came by this line's money.
+ *
+ * - PASS_THROUGH: billed on at exactly the third party's cost (a disbursement).
+ * - MARKED_UP: a third-party cost with the forwarder's margin added.
+ * - FORWARDER_ORIGINATED: the forwarder's own service, no underlying cost.
+ *
+ * This is the single most useful field on the whole invoice, and no forwarder
+ * invoice in the wild carries it. It is what makes margin explicable to a
+ * customer, and it is what tells an auditor which lines can be matched against
+ * a vendor invoice at all — a FORWARDER_ORIGINATED line has nothing to match
+ * against and a PASS_THROUGH line with a margin on it is a contract breach.
+ */
+export const chargeProvenance = pgEnum("charge_provenance", [
+  "PASS_THROUGH",
+  "MARKED_UP",
+  "FORWARDER_ORIGINATED",
+]);
+
+/** What the rate is multiplied by. Determines how a line is re-derivable. */
+export const chargeBasis = pgEnum("charge_basis", [
+  "PER_SHIPMENT",
+  "PER_CONTAINER",
+  "PER_KG",
+  "PER_CBM",
+  "PER_DOCUMENT",
+  "PER_DAY",
+  "PERCENTAGE",
+]);
+
 export const charges = pgTable(
   "charges",
   {
@@ -630,8 +686,33 @@ export const charges = pgTable(
     triggeredBy: text("triggered_by"),
     invoiceId: uuid("invoice_id"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+
+    // -- Invoice-grade detail -------------------------------------------------
+    // Everything below defaults, so charges accrued by the existing lifecycle
+    // engine keep working; the quote engine and the manual line editor fill
+    // them in properly.
+    category: chargeCategory("category").notNull().default("OTHER"),
+    provenance: chargeProvenance("provenance").notNull().default("FORWARDER_ORIGINATED"),
+    basis: chargeBasis("basis").notNull().default("PER_SHIPMENT"),
+    /** Units of `basis`. Kept as an integer: containers, kilos, days, documents. */
+    quantity: integer("quantity").notNull().default(1),
+    /** sell_cents = unit_sell_cents × quantity, except where rounding says otherwise. */
+    unitSellCents: bigint("unit_sell_cents", { mode: "number" }),
+    /** The third party whose cost this line carries. Null for forwarder-originated. */
+    vendorPartyId: uuid("vendor_party_id").references(() => parties.id),
+    /** The carrier's/agent's own invoice number, so a 4-way match has a key. */
+    vendorInvoiceRef: text("vendor_invoice_ref"),
+    /** The contract or tariff this line claims to price from. */
+    contractRef: text("contract_ref"),
+    /** VAT applied to this line, basis points. Disbursements are typically 0. */
+    vatBps: integer("vat_bps").notNull().default(0),
+    /** Set when this line is under dispute and must not be paid yet. */
+    disputed: boolean("disputed").notNull().default(false),
   },
-  (t) => [index("charges_shipment_idx").on(t.shipmentId)],
+  (t) => [
+    index("charges_shipment_idx").on(t.shipmentId),
+    index("charges_invoice_idx").on(t.invoiceId),
+  ],
 );
 
 export const invoiceStatus = pgEnum("invoice_status", [
@@ -640,6 +721,30 @@ export const invoiceStatus = pgEnum("invoice_status", [
   "PAID",
   "OVERDUE",
   "CANCELLED",
+]);
+
+/**
+ * What kind of document this is.
+ *
+ * Worth stating in the schema because the three documents in a freight file
+ * get conflated constantly, and only the first is issued from here:
+ *
+ * - FREIGHT_INVOICE — the forwarder billing its customer for services. This.
+ * - CREDIT_NOTE — a negative freight invoice reversing all or part of one.
+ * - PROFORMA — an advance statement of charges; not a demand for payment and
+ *   never enters the receivables ledger.
+ *
+ * A *commercial invoice* (seller → buyer, the value of the goods, the basis
+ * for customs duty) is a customer document that arrives as an upload and lives
+ * in `documents`. A *bill of lading* is the carrier's contract of carriage and
+ * document of title and lives in `documents` too. Neither is ever generated
+ * here, and a forwarder invoice that gets used as either one causes a customs
+ * valuation problem, not a billing one.
+ */
+export const invoiceType = pgEnum("invoice_type", [
+  "FREIGHT_INVOICE",
+  "CREDIT_NOTE",
+  "PROFORMA",
 ]);
 
 export const invoices = pgTable("invoices", {
@@ -653,7 +758,272 @@ export const invoices = pgTable("invoices", {
   currency: text("currency").notNull(),
   dueDate: timestamp("due_date", { withTimezone: true }).notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+
+  // -- Standardised document fields ------------------------------------------
+  type: invoiceType("type").notNull().default("FREIGHT_INVOICE"),
+  /** Net of tax. total_cents = subtotal + vat. */
+  subtotalCents: bigint("subtotal_cents", { mode: "number" }).notNull().default(0),
+  vatCents: bigint("vat_cents", { mode: "number" }).notNull().default(0),
+  /** Of the subtotal, how much is pass-through disbursement (typically zero-rated). */
+  disbursementCents: bigint("disbursement_cents", { mode: "number" }).notNull().default(0),
+  paymentTermsDays: integer("payment_terms_days").notNull().default(30),
+  /**
+   * The billing profile as it stood when the invoice was issued.
+   *
+   * Snapshotted, not joined. A company changes its VAT number, its bank
+   * account or its trading name, and every historical invoice must keep saying
+   * what it said when it was sent — a reissued PDF that disagrees with the one
+   * the customer holds is a tax problem in every jurisdiction this runs in.
+   */
+  issuerSnapshot: jsonb("issuer_snapshot"),
+  billToSnapshot: jsonb("bill_to_snapshot"),
+  /** Carrier's bill of lading / air waybill, carried onto the invoice for matching. */
+  transportDocumentRef: text("transport_document_ref"),
+  /** Customer's own PO or file reference — the field AP teams match on. */
+  customerReference: text("customer_reference"),
+  /** Free text printed under the totals: terms, remittance instructions. */
+  notes: text("notes"),
+  /** Null until an audit has run. See `invoice_exceptions`. */
+  auditedAt: timestamp("audited_at", { withTimezone: true }),
 });
+
+/**
+ * Per-company invoice identity and defaults — the part that makes this
+ * multi-tenant rather than one forwarder's billing system.
+ *
+ * Every company on the platform issues invoices under its own registration,
+ * its own numbering, its own bank account and its own terms. None of that can
+ * be a constant in code, and none of it can be shared: a customer receiving an
+ * invoice must be able to pay it into the right account and reclaim the right
+ * VAT.
+ */
+export const tenantBillingProfiles = pgTable("tenant_billing_profiles", {
+  tenantId: uuid("tenant_id")
+    .primaryKey()
+    .references(() => tenants.id, { onDelete: "cascade" }),
+  legalName: text("legal_name").notNull(),
+  tradingName: text("trading_name"),
+  registrationNumber: text("registration_number"),
+  vatNumber: text("vat_number"),
+  /**
+   * SARS customs client number (CCN). The 8-digit code a registered importer,
+   * exporter or clearing agent trades under. Required on any customs
+   * declaration and printed on the invoice so the customer's own broker can
+   * reconcile the entry against the billing.
+   */
+  customsClientNumber: text("customs_client_number"),
+  addressLines: text("address_lines"),
+  country: text("country").notNull().default("ZA"),
+  email: text("email"),
+  phone: text("phone"),
+  /** Data URI or object key. Rendered on the document; optional. */
+  logoUrl: text("logo_url"),
+
+  bankName: text("bank_name"),
+  bankAccountName: text("bank_account_name"),
+  bankAccountNumber: text("bank_account_number"),
+  bankBranchCode: text("bank_branch_code"),
+  bankSwift: text("bank_swift"),
+
+  /** "INV" → INV-2026-000123. Per tenant so two companies never collide. */
+  invoiceNumberPrefix: text("invoice_number_prefix").notNull().default("INV"),
+  /**
+   * The next number this company will issue.
+   *
+   * A column rather than a Postgres sequence: every tenant needs its own
+   * unbroken run starting at 1, and tax authorities in several jurisdictions
+   * require invoice numbering to be sequential and gapless per issuer. A
+   * shared sequence gives company B the numbers company A didn't use, which
+   * looks like missing invoices in an audit. Incremented with
+   * `update ... returning` inside the issuing transaction, so it is atomic
+   * under concurrency and rolls back with a failed issue.
+   */
+  nextInvoiceNumber: integer("next_invoice_number").notNull().default(1),
+  defaultPaymentTermsDays: integer("default_payment_terms_days").notNull().default(30),
+  defaultCurrency: text("default_currency").notNull().default("ZAR"),
+  /** Standard rate applied to taxable lines. ZA is 15% = 1500 bps. */
+  vatBps: integer("vat_bps").notNull().default(1500),
+  /** Printed under the totals on every invoice this company issues. */
+  invoiceFooter: text("invoice_footer"),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/**
+ * Charge-code normalisation.
+ *
+ * The same charge arrives as "OHC", "Origin Handling", "ORIG HANDLING CHG" or
+ * bundled into "Origin Services" depending on which carrier or agent produced
+ * it. Comparing spend across vendors, or matching a vendor invoice against a
+ * contract, is impossible until those collapse onto one canonical code. This
+ * table is that mapping, per tenant, because every forwarder's vendors speak a
+ * different dialect.
+ */
+export const chargeCodeAliases = pgTable(
+  "charge_code_aliases",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id").notNull().references(() => tenants.id),
+    /** As it appears on the vendor's document, upper-cased and trimmed. */
+    alias: text("alias").notNull(),
+    /** The canonical code in CHARGE_CODES. */
+    canonicalCode: text("canonical_code").notNull(),
+    /** Which vendor uses this vocabulary. Null = applies to all of them. */
+    vendorPartyId: uuid("vendor_party_id").references(() => parties.id),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("charge_code_alias_uq").on(t.tenantId, t.alias)],
+);
+
+export const exceptionSeverity = pgEnum("exception_severity", [
+  "INFO",
+  "WARN",
+  "CRITICAL",
+]);
+
+export const exceptionStatus = pgEnum("exception_status", [
+  "OPEN",
+  "ACCEPTED",
+  "DISPUTED",
+  "RESOLVED",
+]);
+
+/**
+ * A finding from the invoice audit — one line that failed one match.
+ *
+ * Most AP teams run a 2-way match: does the invoice total agree with the
+ * quote. That catches nothing, because the discrepancies are inside lines that
+ * were never quoted. The audit here matches each line against four sources —
+ * the customer contract, the underlying vendor cost or a published benchmark,
+ * the shipment's own facts, and the service event record — and every failure
+ * becomes a row here, before the invoice is paid rather than after.
+ */
+export const invoiceExceptions = pgTable(
+  "invoice_exceptions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id").notNull().references(() => tenants.id),
+    invoiceId: uuid("invoice_id")
+      .notNull()
+      .references(() => invoices.id, { onDelete: "cascade" }),
+    chargeId: uuid("charge_id").references(() => charges.id, { onDelete: "cascade" }),
+    /** Stable rule identifier, e.g. FUEL_INDEX_VARIANCE. */
+    code: text("code").notNull(),
+    severity: exceptionSeverity("severity").notNull(),
+    status: exceptionStatus("status").notNull().default("OPEN"),
+    message: text("message").notNull(),
+    /** What the audit believes the line should have been. Negative = undercharge. */
+    varianceCents: bigint("variance_cents", { mode: "number" }),
+    /** Rule inputs, so a finding can be explained months later. */
+    evidence: jsonb("evidence"),
+    detectedAt: timestamp("detected_at", { withTimezone: true }).notNull().defaultNow(),
+    resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+    resolutionNote: text("resolution_note"),
+  },
+  (t) => [
+    index("invoice_exceptions_invoice_idx").on(t.invoiceId),
+    // One finding per rule per line per invoice: re-running an audit updates
+    // rather than accumulating a duplicate every time someone opens the screen.
+    //
+    // Two indexes, not one, because `charge_id` is nullable for findings about
+    // the invoice as a whole — and in Postgres NULL never equals NULL, so a
+    // single three-column unique index would let every re-run insert another
+    // copy of exactly the findings that matter most.
+    uniqueIndex("invoice_exceptions_line_uq")
+      .on(t.invoiceId, t.code, t.chargeId)
+      .where(sql`charge_id is not null`),
+    uniqueIndex("invoice_exceptions_doc_uq")
+      .on(t.invoiceId, t.code)
+      .where(sql`charge_id is null`),
+  ],
+);
+
+/**
+ * Cached quotes from a fuel index — the reference a BAF/EBS line is validated
+ * against.
+ *
+ * EXTERNAL API. Bunker and jet-fuel indices are commercial feeds (Platts /
+ * Argus for bunker, IATA for jet fuel) or carrier-published tariff pages. This
+ * table is the local mirror; `FUEL_INDEX_URL` points at whichever the operator
+ * has licensed. With it unset the audit simply does not run its fuel rule and
+ * says so, rather than inventing a benchmark.
+ */
+export const fuelIndexQuotes = pgTable(
+  "fuel_index_quotes",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    /** e.g. PLATTS_VLSFO_ROTTERDAM, IATA_JET_FUEL_AFRICA, MAERSK_BAF_ZA_EUR. */
+    indexCode: text("index_code").notNull(),
+    /** Where the number came from, so a dispute can cite it. */
+    source: text("source").notNull(),
+    quotedFor: timestamp("quoted_for", { withTimezone: true }).notNull(),
+    /** Index level in cents of `currency` per tonne (bunker) or per litre (jet). */
+    valueCents: bigint("value_cents", { mode: "number" }).notNull(),
+    currency: text("currency").notNull(),
+    fetchedAt: timestamp("fetched_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("fuel_index_quote_uq").on(t.indexCode, t.quotedFor)],
+);
+
+export const filingStatus = pgEnum("filing_status", [
+  "DRAFT",
+  "QUEUED",
+  "SUBMITTED",
+  "ACKNOWLEDGED",
+  "QUERIED",
+  "ACCEPTED",
+  "REJECTED",
+]);
+
+/**
+ * A statutory submission and its life outside this system.
+ *
+ * EXTERNAL API. Customs and tax filings leave the platform through an
+ * authority's channel — in South Africa, SARS Customs EDI (CUSDEC/CUSRES over
+ * the SARS gateway) for declarations, and eFiling for VAT. Both require the
+ * *operator* to hold the accreditation: a registered customs client number, an
+ * EDI user profile issued by SARS, and a client certificate. No amount of code
+ * substitutes for that registration.
+ *
+ * So this table is the seam. Every filing is built, validated and stored here
+ * with a full audit trail whether or not a transport is configured; when
+ * `SARS_EDI_URL` is set the transport ships the payload and writes back the
+ * authority's reference and response. Unconfigured, filings stop at QUEUED and
+ * the screen says exactly what is missing — which is the honest state, and the
+ * one a forwarder can act on.
+ */
+export const complianceFilings = pgTable(
+  "compliance_filings",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id").notNull().references(() => tenants.id),
+    shipmentId: uuid("shipment_id").references(() => shipments.id),
+    /** SARS_CUSDEC | SARS_VAT201 | SARS_EXPORT_RELEASE | ... */
+    kind: text("kind").notNull(),
+    authority: text("authority").notNull().default("SARS"),
+    status: filingStatus("status").notNull().default("DRAFT"),
+    /** The built submission, in the authority's field vocabulary. */
+    payload: jsonb("payload").notNull(),
+    /** Our idempotency key on the authority's side. */
+    submissionRef: text("submission_ref"),
+    /** Theirs: LRN / MRN / case number. */
+    authorityRef: text("authority_ref"),
+    responsePayload: jsonb("response_payload"),
+    /** Populated when unconfigured or refused, so the screen never shows a blank. */
+    lastError: text("last_error"),
+    submittedAt: timestamp("submitted_at", { withTimezone: true }),
+    settledAt: timestamp("settled_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("compliance_filings_shipment_idx").on(t.shipmentId),
+    // Partial: a draft has no submission reference yet, and NULLs do not
+    // conflict in Postgres, so an unqualified unique index would be a no-op
+    // for drafts and a trap for anyone who assumed otherwise.
+    uniqueIndex("compliance_filings_submission_uq")
+      .on(t.tenantId, t.kind, t.submissionRef)
+      .where(sql`submission_ref is not null`),
+  ],
+);
 
 /**
  * Money actually received against an invoice.
