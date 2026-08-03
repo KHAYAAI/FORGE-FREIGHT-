@@ -18,6 +18,10 @@ export default tseslint.config(
       // block of constants spliced into another file's scope, so linting it as
       // a standalone module reports every one of them as unused.
       "demo/**",
+      // Same for the single-file console: its parts are fragments spliced into
+      // one scope at build time, so linting them as standalone modules reports
+      // every cross-file reference as undefined.
+      "console/**",
     ],
   },
   js.configs.recommended,

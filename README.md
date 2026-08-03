@@ -70,6 +70,7 @@ topic (keyed by shipment for per-shipment ordering).
 | `apps/worker` | Temporal worker — shipment lifecycle workflow (time-based exception escalation) |
 | `apps/web` | Operator console — quoting, shipments, ops kanban, customs, documents, invoices, invoice audit, billing settings, finance views, parties, external systems, system monitor |
 | `demo/` | Investor walkthrough — one self-contained HTML file, `python3 demo/build.py` |
+| `console/` | The console as a single runnable file, seeded with a book of freight — `python3 console/build.py` |
 | `docs/architecture.md` | Architecture, non-negotiables, milestone plan |
 | `docs/INTEGRATIONS.md` | Every external system, what it degrades to, and the accreditations required |
 | `LAUNCH.md` | Production readiness checklist — what's done, what's deferred, operator setup steps |

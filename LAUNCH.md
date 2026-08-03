@@ -722,6 +722,23 @@ wired for with the accreditations each one needs. Its source now lives in
 `demo/` and builds with `python3 demo/build.py` — it had been sitting in a
 scratch directory, which is a poor place for the thing you show investors.
 
+### The console as a single file
+
+`console/` builds the whole operator console into one self-contained HTML file
+with a seeded book of freight — quote a corridor, book it, move it, clear it,
+invoice it, run the four-way match, query a line, then switch seats and read the
+same shipment back as the shipper. No Postgres, no Keycloak, no Redpanda.
+
+The arithmetic is ported from the platform's own pure modules rather than
+approximated, and the seeded book is built by calling the same mutations the
+buttons call. That caught two real problems on the first run: the quote engine
+correctly refused a seeded job asking for an express service level against a
+26-day sailing, and the invoice audit fired on the platform's own arithmetic
+because quoted surcharges were being labelled pass-through disbursements when
+everything on a quote is priced buy-plus-margin by construction. The second is
+a genuine mislabelling that would have produced false CRITICAL findings on real
+invoices.
+
 ### Verified live
 
 Quoted a real consignment, booked it, added seven charge lines across seven

@@ -1,0 +1,111 @@
+/*
+ * Tokens are the product's own (apps/web/src/app/globals.css) — an
+ * operations-console palette: near-monochrome slate, one restrained signal
+ * blue, desaturated semantics. One addition: amber is promoted from a status
+ * colour to the thread for the infrastructure business, so the two revenue
+ * models stay visually distinct wherever they appear.
+ */
+:root {
+  --canvas: #0a0d12;
+  --surface: #10141b;
+  --raised: #161b24;
+  --inset: #0d1117;
+  --hover: #1c222d;
+  --hairline: #232a35;
+  --strong: #303947;
+  --t1: #e4e8ef;
+  --t2: #8992a3;
+  --t3: #5a6373;
+  --accent: #5b8def;
+  --accent-strong: #7ea4f2;
+  --accent-wash: rgba(91,141,239,.12);
+  --accent-border: rgba(91,141,239,.35);
+  --rails: #d99a3f;
+  --rails-wash: rgba(217,154,63,.13);
+  --rails-border: rgba(217,154,63,.34);
+  --success: #4caf7d;
+  --success-wash: rgba(76,175,125,.14);
+  --warning: #d99a3f;
+  --warning-wash: rgba(217,154,63,.14);
+  --critical: #dd5f5b;
+  --critical-wash: rgba(221,95,91,.14);
+  --panel-shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.28);
+  --sea: #0b0f16;
+  --land: #1a212c;
+  --land-edge: #2b3542;
+}
+
+:root[data-theme="light"] {
+  --canvas: #f1f3f6;
+  --surface: #ffffff;
+  --raised: #ffffff;
+  --inset: #eaedf2;
+  --hover: #eef1f6;
+  --hairline: #dde1e8;
+  --strong: #c5cbd6;
+  --t1: #161b24;
+  --t2: #565f70;
+  --t3: #838da0;
+  --accent: #2f66d0;
+  --accent-strong: #1f52b3;
+  --accent-wash: rgba(47,102,208,.08);
+  --accent-border: rgba(47,102,208,.3);
+  --rails: #9a6210;
+  --rails-wash: rgba(154,98,16,.09);
+  --rails-border: rgba(154,98,16,.28);
+  --success: #1f8a57;
+  --success-wash: rgba(31,138,87,.1);
+  --warning: #a86a15;
+  --warning-wash: rgba(168,106,21,.1);
+  --critical: #c23b37;
+  --critical-wash: rgba(194,59,55,.1);
+  --panel-shadow: 0 1px 2px rgba(20,24,33,.06), 0 8px 24px rgba(20,24,33,.06);
+  --sea: #dfe6f0;
+  --land: #fbfcfe;
+  --land-edge: #aab5c6;
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    --canvas: #f1f3f6; --surface: #ffffff; --raised: #ffffff; --inset: #eaedf2;
+    --hover: #eef1f6; --hairline: #dde1e8; --strong: #c5cbd6;
+    --t1: #161b24; --t2: #565f70; --t3: #838da0;
+    --accent: #2f66d0; --accent-strong: #1f52b3;
+    --accent-wash: rgba(47,102,208,.08); --accent-border: rgba(47,102,208,.3);
+    --rails: #9a6210; --rails-wash: rgba(154,98,16,.09); --rails-border: rgba(154,98,16,.28);
+    --success: #1f8a57; --success-wash: rgba(31,138,87,.1);
+    --warning: #a86a15; --warning-wash: rgba(168,106,21,.1);
+    --critical: #c23b37; --critical-wash: rgba(194,59,55,.1);
+    --panel-shadow: 0 1px 2px rgba(20,24,33,.06), 0 8px 24px rgba(20,24,33,.06);
+    --sea: #dfe6f0; --land: #fbfcfe; --land-edge: #aab5c6;
+  }
+}
+
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+
+body {
+  margin: 0;
+  background: var(--canvas);
+  color: var(--t1);
+  font-family: 'Plex Sans', ui-sans-serif, system-ui, sans-serif;
+  font-size: 13.5px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+}
+
+.mono { font-family: 'Plex Mono', ui-monospace, monospace; }
+.tab { font-variant-numeric: tabular-nums; }
+
+:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--canvas), 0 0 0 4px var(--accent);
+  border-radius: 2px;
+}
+
+::selection { background: var(--accent-wash); color: var(--t1); }
+
+* { scrollbar-width: thin; scrollbar-color: var(--strong) transparent; }
+*::-webkit-scrollbar { width: 8px; height: 8px; }
+*::-webkit-scrollbar-thumb { background: var(--strong); border-radius: 4px; }
+

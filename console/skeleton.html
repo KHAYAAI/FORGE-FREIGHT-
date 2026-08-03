@@ -1,0 +1,28 @@
+<div class="app">
+  <aside class="side">
+    <div class="brand" id="brand"></div>
+    <nav id="nav"></nav>
+    <div style="padding:18px 16px 0;border-top:1px solid var(--hairline);margin-top:18px">
+      <div class="nav-group" style="padding:0;margin:0 0 6px">Session</div>
+      <div id="roles" class="chip-row" style="gap:4px"></div>
+      <p class="small muted" style="margin:9px 0 0;font-size:10.5px;line-height:1.45">
+        Realm roles from the access token. Writes are refused without them — switch seats from the
+        badge at the top to feel it.</p>
+    </div>
+  </aside>
+
+  <div class="main">
+    <div class="topbar">
+      <span class="crumbs" id="crumbs">FORGE Freight OS</span>
+      <span class="pill-live" style="margin-left:14px"><span class="dot pulse"></span>Event stream live</span>
+      <div style="margin-left:auto;position:relative">
+        <button class="who" id="who" aria-haspopup="true" aria-expanded="false"></button>
+        <div class="menu" id="menu" hidden style="right:0"></div>
+      </div>
+      <button class="btn sm" id="theme">Light</button>
+    </div>
+    <div class="view" id="view"></div>
+  </div>
+</div>
+
+<div class="toasts" id="toasts"></div>
