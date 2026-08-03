@@ -72,7 +72,7 @@ function createConsignment(S, tenantId, input, mode) {
 /* ------------------------------------------------------------------ quote */
 
 function createQuote(S, tenantId, input) {
-  const result = buildQuote(S, input);
+  const result = buildQuote(S, { ...input, tenantId });
   const q = {
     id: uid(S, "q"), tenantId, customerId: input.customerId, status: "ISSUED",
     origin: input.origin, destination: input.destination, mode: input.mode,
@@ -440,7 +440,9 @@ function contractFor(S, inv) {
      quote at all — origin handling, terminal charges. Those arrive on an
      agent's own invoice and are exactly where handling errors live. */
   const covered = new Set(fromQuote.map((c) => c.code));
-  return fromQuote.concat((S.agencyTariff || []).filter((c) => !covered.has(c.code)));
+  return fromQuote.concat((S.agencyTariff || [])
+    .filter((c) => !c.tenantId || c.tenantId === inv.tenantId)
+    .filter((c) => !covered.has(c.code)));
 }
 
 function runAudit(S, invoiceId) {
@@ -569,8 +571,9 @@ function populate(S) {
   const ENTRY_AT = 5; // container.discharged — the point an entry is lodgeable
 
   const book = (spec) => {
-    const cons = createConsignment(S, "t-op", cargo(spec.cargo), spec.mode);
-    const q = createQuote(S, "t-op", {
+    const owner = spec.tenantId || "t-op";
+    const cons = createConsignment(S, owner, cargo(spec.cargo), spec.mode);
+    const q = createQuote(S, owner, {
       customerId: spec.customerId, origin: spec.origin, destination: spec.destination,
       mode: spec.mode, containerType: spec.eq, containerQuantity: spec.qty,
       incoterm: spec.incoterm || "CIF", consignment: cons,
@@ -733,25 +736,75 @@ function populate(S) {
     });
   }
 
-  /* The partner's own book, on the same rails. Its shipments belong to its
-     tenant and never appear in the operator's list. */
-  const pcons = createConsignment(S, "t-pa", {
-    description: "Export-grade apples and pears, controlled atmosphere",
-    cargoType: "REEFER", urgency: "EXPRESS", portOfExit: "ZACPT", portOfEntry: "BRSSZ",
-    tempMinDeciC: -5, tempMaxDeciC: 15,
-    items: [{ description: "Apples, 12.5 kg cartons", packageType: "CARTON", pieces: 3600,
-      grossWeightGrams: 22_500_000, lengthMm: 400, widthMm: 300, heightMm: 260, stackable: true }],
-  }, "OCEAN");
-  const pq = createQuote(S, "t-pa", {
-    customerId: "p-cc-cust", origin: "ZACPT", destination: "BRSSZ", mode: "OCEAN",
-    containerType: "40RF", containerQuantity: 2, incoterm: "CIF",
-    consignment: pcons, urgency: "EXPRESS",
-  });
-  const ps = bookQuote(S, pq.id, "CMDU8871220");
-  ps.tenantId = "t-pa";
-  S.charges.filter((c) => c.shipmentId === ps.id).forEach((c) => { c.tenantId = "t-pa"; });
-  S.events.filter((e) => e.shipmentId === ps.id).forEach((e) => { e.tenantId = "t-pa"; });
-  for (let i = 0; i < 4; i++) advance(S, ps.id, 12);
+  /* The partner's own book, on the same rails. Built by the same pipeline, so
+     every screen it has is populated by the same code the operator's is — and
+     none of it appears in the operator's lists, because every read carries a
+     tenant predicate rather than a filter somebody remembered to add. */
+  const partnerJobs = [
+    { tenantId: "t-pa", customerId: "p-cc-cust", origin: "ZACPT", destination: "BRSSZ",
+      mode: "OCEAN", eq: "40RF", qty: 2, steps: 9, carrierRef: "CMDU8871220",
+      cargo: { description: "Export-grade apples and pears, controlled atmosphere",
+        cargoType: "REEFER", urgency: "EXPRESS", portOfExit: "ZACPT", portOfEntry: "BRSSZ",
+        tempMinDeciC: -5, tempMaxDeciC: 15,
+        items: [{ description: "Apples, 12.5 kg cartons", packageType: "CARTON", pieces: 3600,
+          grossWeightGrams: 22_500_000, lengthMm: 400, widthMm: 300, heightMm: 260,
+          stackable: true, marksAndNumbers: "OFC/SSZ/1-3600" }] } },
+    { tenantId: "t-pa", customerId: "p-cc-cust", origin: "ZACPT", destination: "NLRTM",
+      mode: "OCEAN", eq: "40RF", qty: 1, steps: 9, carrierRef: "MAEU4410771",
+      cargo: { description: "Table grapes, export grade", cargoType: "REEFER", urgency: "EXPRESS",
+        portOfExit: "ZACPT", portOfEntry: "NLRTM", tempMinDeciC: -5, tempMaxDeciC: 5,
+        items: [{ description: "Grapes, 4.5 kg punnets", packageType: "CARTON", pieces: 2800,
+          grossWeightGrams: 12_600_000, lengthMm: 400, widthMm: 300, heightMm: 180, stackable: true }] } },
+    { tenantId: "t-pa", customerId: "p-cc-cust", origin: "ZACPT", destination: "ZAPLZ",
+      mode: "ROAD", eq: "40HC", qty: 1, steps: 4, carrierRef: null,
+      cargo: { description: "Packaging materials for the Gqeberha pack house",
+        portOfExit: "ZACPT", portOfEntry: "ZAPLZ", pickupLocode: "ZACPT",
+        pickupAddress: "Unit 9, Montague Gardens, Cape Town",
+        items: [{ description: "Corrugated cartons, flat-packed", packageType: "BALE", pieces: 180,
+          grossWeightGrams: 5_400_000, lengthMm: 1200, widthMm: 800, heightMm: 600, stackable: true }] } },
+  ];
+
+  const partnerBuilt = [];
+  for (const j of partnerJobs) {
+    try { partnerBuilt.push(book(j)); }
+    catch (err) { console.warn("seed: skipped a partner job —", err.message); }
+  }
+
+  for (const s of partnerBuilt) {
+    if (s.step < 8) continue;
+    const invs = issueInvoice(S, s.id, { customerReference: `OFC-${4400 + S.seq}` });
+    for (const inv of invs) runAudit(S, inv.id);
+  }
+
+  const pInv = S.invoices.filter((i) => i.tenantId === "t-pa");
+  if (pInv[0]) recordPayment(S, pInv[0].id, {
+    amountCents: Math.round(pInv[0].totalCents * 0.55), paymentRef: "ABSA-2026-30188" });
+  if (pInv[1]) pInv[1].dueDate = S.now - 5 * DAY;
+  markOverdue(S);
+
+  if (partnerBuilt[1]) {
+    emit(S, { type: "booking.rolled", tenantId: "t-pa", shipmentId: partnerBuilt[1].id, src: "DCSA",
+      payload: { reason: "Reefer plug shortage at Cape Town", etaShift: "+4d" } });
+    S.exceptions.push({ id: uid(S, "exc"), tenantId: "t-pa", shipmentId: partnerBuilt[1].id,
+      code: "BOOKING_ROLLED", status: "OPEN",
+      detail: "Reefer plug shortage at Cape Town; the box rolls to the next sailing.", raisedAt: S.now });
+    partnerBuilt[1].eta += 4 * DAY;
+  }
+
+  if (partnerBuilt[0]) {
+    S.documents.push({ id: uid(S, "doc"), tenantId: "t-pa", shipmentId: partnerBuilt[0].id,
+      filename: "phytosanitary-cert-OFC-8871.pdf", kind: "CERTIFICATE", confidence: 0.79,
+      status: "NEEDS_REVIEW",
+      fields: { issuer: "DALRRD", commodity: "Malus domestica", treatment: "Cold sterilisation, 24 days" },
+      uploadedAt: S.now - DAY });
+    emit(S, { type: "document.uploaded", tenantId: "t-pa", shipmentId: partnerBuilt[0].id,
+      payload: { filename: "phytosanitary-cert-OFC-8871.pdf", kind: "CERTIFICATE" } });
+
+    const pe = entryFor(S, partnerBuilt[0]);
+    if (pe) lodgeFiling(S, partnerBuilt[0].id, "SARS_EXPORT_RELEASE", {
+      reference: pe.reference, lines: pe.lines.length,
+      customsValue: money(entryTotals(pe).customsValue, "ZAR") });
+  }
 
   /* Leave the clock where the work left it, one day on. Setting it back to the
      start would stamp everything the user does next as earlier than the seed —

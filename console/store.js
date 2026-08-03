@@ -129,6 +129,21 @@ function seed() {
     destination: "ZACPT", eq: "40HC", buyCents: 228000, currency: "USD", transitDays: 30,
     validFrom: T0 - 200 * DAY, validTo: T0 - 12 * DAY, surcharges: [] });
 
+  const PRC = (id, o) => { S.rateCards.push({ id, tenantId: "t-pa", kind: "CONTRACT",
+    validFrom: T0 - 40 * DAY, validTo: T0 + 120 * DAY, ...o }); };
+  PRC("pc-1", { carrierId: "p-cmacgm", carrier: "CMA CGM", mode: "OCEAN", origin: "ZACPT",
+    destination: "BRSSZ", eq: "40RF", buyCents: 206000, currency: "USD", transitDays: 18,
+    surcharges: [
+      { code: "THC", desc: "Terminal handling, Santos", basis: "PER_CONTAINER", amount: 21000, currency: "USD" },
+      { code: "BAF", desc: "Bunker adjustment", basis: "PERCENT_OF_FREIGHT", amount: 1080, currency: "USD" },
+    ] });
+  PRC("pc-2", { carrierId: "p-maersk", carrier: "Maersk Line", mode: "OCEAN", origin: "ZACPT",
+    destination: "NLRTM", eq: "40RF", buyCents: 251000, currency: "USD", transitDays: 20,
+    surcharges: [{ code: "THC", desc: "Terminal handling, Rotterdam", basis: "PER_CONTAINER", amount: 24500, currency: "USD" }] });
+  PRC("pc-3", { carrierId: "p-n3", carrier: "Boland Haulage", mode: "ROAD", origin: "ZACPT",
+    destination: "ZAPLZ", eq: "40HC", buyCents: 1420000, currency: "ZAR", transitDays: 1,
+    surcharges: [{ code: "BAF", desc: "Fuel levy", basis: "PERCENT_OF_FREIGHT", amount: 950, currency: "ZAR" }] });
+
   S.marginRules = [
     { id: "mr-1", tenantId: "t-op", customerId: null, origin: "CNSHA", destination: "ZADUR",
       mode: "OCEAN", marginBps: 1200, minMarginCents: 100000, createdAt: T0 - 90 * DAY },
@@ -136,6 +151,12 @@ function seed() {
       mode: null, marginBps: 1800, minMarginCents: 150000, createdAt: T0 - 180 * DAY },
     { id: "mr-3", tenantId: "t-op", customerId: "p-ubuntu", origin: null, destination: null,
       mode: null, marginBps: 1500, minMarginCents: 120000, createdAt: T0 - 40 * DAY },
+    /* The partner's own sell side, at its own margin. Nobody on the operator's
+       side can see it, and it is not derived from theirs. */
+    { id: "pmr-1", tenantId: "t-pa", customerId: null, origin: null, destination: null,
+      mode: null, marginBps: 2200, minMarginCents: 180000, createdAt: T0 - 30 * DAY },
+    { id: "pmr-2", tenantId: "t-pa", customerId: null, origin: "ZACPT", destination: "BRSSZ",
+      mode: "OCEAN", marginBps: 1600, minMarginCents: 140000, createdAt: T0 - 20 * DAY },
   ];
 
   S.billingProfiles["t-op"] = {
@@ -168,13 +189,15 @@ function seed() {
      it. Handling billed above the agreed tariff is the commonest error in the
      trade and the audit needs the number to catch it. */
   S.agencyTariff = [
-    { code: "OHC", unitCents: 185000, currency: "ZAR", source: "Origin agency agreement, Q3 2026" },
-    { code: "DEM", unitCents: 95000, currency: "ZAR", source: "Terminal tariff, Durban" },
+    { tenantId: "t-op", code: "OHC", unitCents: 185000, currency: "ZAR", source: "Origin agency agreement, Q3 2026" },
+    { tenantId: "t-op", code: "DEM", unitCents: 95000, currency: "ZAR", source: "Terminal tariff, Durban" },
+    { tenantId: "t-pa", code: "OHC", unitCents: 198000, currency: "ZAR", source: "Cape Town terminal tariff, 2026" },
   ];
 
   S.aliases = [
     { id: "al-1", tenantId: "t-op", alias: "OTHCHARGE", canonical: "OHC", vendor: "Shanghai Port Agency" },
     { id: "al-2", tenantId: "t-op", alias: "FUELADJ", canonical: "BAF", vendor: "Maersk Line" },
+    { id: "al-3", tenantId: "t-pa", alias: "QUAYHANDLING", canonical: "OHC", vendor: "Cape Town Terminal" },
   ];
 
   return S;
@@ -184,10 +207,15 @@ function seed() {
 
 const LANE_KEY = (o, d, m) => `${o}→${d}·${m}`;
 
-function selectRateCards(S, { origin, destination, mode, containerType, at, urgency }) {
+function selectRateCards(S, { tenantId, origin, destination, mode, containerType, at, urgency }) {
   const maxTransit = URGENCY[urgency || "STANDARD"].maxTransitDays;
   return S.rateCards
-    .filter((c) => c.tenantId === "t-op")
+    /* Scoped to the company doing the quoting. This was pinned to the operator,
+       which meant a partner agent pricing its own lane was quoting off the
+       operator's buy rates — and seeing them on the Rates screen. A tenant
+       predicate written as a constant is a tenant predicate that will be wrong
+       the first time a second company signs up. */
+    .filter((c) => c.tenantId === tenantId)
     .filter((c) => c.origin === origin && c.destination === destination && c.mode === mode)
     .filter((c) => !containerType || c.eq === containerType)
     .filter((c) => at >= c.validFrom && at <= c.validTo)
@@ -199,9 +227,9 @@ function selectRateCards(S, { origin, destination, mode, containerType, at, urge
 /* Most specific rule wins; ties break by recency. Without the tiebreak the
    same quote could price at 15% or 18% depending on row order, which is a
    number a customer will eventually notice. */
-function resolveMarginRule(S, { customerId, origin, destination, mode }) {
+function resolveMarginRule(S, { tenantId, customerId, origin, destination, mode }) {
   const scored = S.marginRules
-    .filter((r) => r.tenantId === "t-op")
+    .filter((r) => r.tenantId === tenantId)
     .filter((r) => (!r.customerId || r.customerId === customerId)
       && (!r.origin || r.origin === origin)
       && (!r.destination || r.destination === destination)
@@ -237,16 +265,16 @@ const SURCHARGE_BASIS = {
 function buildQuote(S, input) {
   const cards = selectRateCards(S, { ...input, at: S.now });
   if (!cards.length) {
-    const anyLane = S.rateCards.some((c) => c.origin === input.origin
-      && c.destination === input.destination && c.mode === input.mode);
+    const anyLane = S.rateCards.some((c) => c.tenantId === input.tenantId
+      && c.origin === input.origin && c.destination === input.destination && c.mode === input.mode);
     const err = new Error(anyLane
-      ? `No rate on ${input.origin}→${input.destination} meets a ${URGENCY[input.urgency].label.toLowerCase()} service level. The fastest available transit is ${Math.min(...S.rateCards.filter((c) => c.origin === input.origin && c.destination === input.destination).map((c) => c.transitDays || 999))} days.`
+      ? `No rate on ${input.origin}→${input.destination} meets a ${URGENCY[input.urgency].label.toLowerCase()} service level. The fastest available transit is ${Math.min(...S.rateCards.filter((c) => c.tenantId === input.tenantId && c.origin === input.origin && c.destination === input.destination).map((c) => c.transitDays || 999))} days.`
       : `No valid rate card for ${input.origin}→${input.destination} by ${input.mode}.`);
     err.kind = anyLane ? "NO_SERVICE_LEVEL" : "NO_RATE";
     throw err;
   }
   const card = cards.slice().sort((a, b) => a.buyCents - b.buyCents)[0];
-  const rule = resolveMarginRule(S, { ...input, customerId: input.customerId });
+  const rule = resolveMarginRule(S, input);
   const qty = input.containerQuantity;
 
   const lines = [priceLine("FRT",

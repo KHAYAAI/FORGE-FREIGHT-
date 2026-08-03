@@ -345,8 +345,10 @@ ACTIONS.book = () => {
 /* ================================================================= rates */
 
 route(/^\/rates$/, () => {
-  const cards = S.rateCards.filter((c) => c.tenantId === "t-op");
-  const rules = S.marginRules.filter((r) => r.tenantId === "t-op");
+  /* This company's own buy and sell sides. Pinned to the operator, it showed a
+     partner agent somebody else's carrier rates and margins. */
+  const cards = S.rateCards.filter((c) => c.tenantId === tenantOf(S));
+  const rules = S.marginRules.filter((r) => r.tenantId === tenantOf(S));
   const validity = (c) => {
     if (S.now > c.validTo) return tag("Expired", "bad", true);
     if (c.validTo - S.now < 21 * DAY) return tag(`${Math.ceil((c.validTo - S.now) / DAY)}d left`, "warn", true);
