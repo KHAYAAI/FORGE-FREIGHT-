@@ -52,6 +52,22 @@ pass-through disbursements.
 - **The clock.** Fixed at a seeded instant and advanced by the work you do,
   not by the wall, so every figure is reproducible and ageing still moves.
 
+## The recorded tour
+
+`tour.mjs` drives the built file under Playwright and records an 8½-minute
+walkthrough — real clicks, real typing, burned-in captions, a chapter frame per
+section. `TOUR.md` has the chapter list and the re-recording instructions.
+
+```bash
+node console/tour.mjs
+```
+
+It is also the console's end-to-end test, and worth running after a change even
+when nobody wants the video: each chapter asserts against live state and aborts
+on a mismatch rather than narrating over an empty panel. It found the quote
+form pricing against `undefined` as the tenant — every quote raised from the
+form returned "no valid rate card", on lanes the operator plainly had.
+
 ## Layout
 
 | File | What |

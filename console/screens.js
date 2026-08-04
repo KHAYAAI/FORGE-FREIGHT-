@@ -115,7 +115,11 @@ route(/^\/quotes\/new$/, () => {
   const m = computeTotals(draft.items, QF.mode);
   const reqs = handlingRequirements(draft);
   const blocking = reqs.filter((r) => r.blocking);
-  const lanes = [...new Set(S.rateCards.map((c) => `${c.origin}|${c.destination}|${c.mode}`))];
+  /* Scoped, like everything else that reads rate cards. Unscoped, the picker
+     offered corridors this company has no tariff on — another tenant's lanes,
+     visible in a dropdown, priced as "no valid rate card". */
+  const lanes = [...new Set(S.rateCards.filter((c) => c.tenantId === tenantOf(S))
+    .map((c) => `${c.origin}|${c.destination}|${c.mode}`))];
 
   const opt = (v, label, sel) => `<option value="${esc(v)}" ${v === sel ? "selected" : ""}>${esc(label)}</option>`;
 
@@ -311,7 +315,13 @@ ACTIONS.price = () => {
     const cons = consignmentDraft();
     const blocking = handlingRequirements(cons).filter((r) => r.blocking);
     if (blocking.length) throw Object.assign(new Error(blocking[0].description), { kind: "BLOCKED" });
+    /* The tenant predicate again. Pricing from the screen went through
+       buildQuote without it, so selectRateCards filtered on `undefined` and
+       every quote raised from the form came back "no valid rate card" — on a
+       lane the operator demonstrably had a card for. The seeded book hid it
+       because populate() prices through createQuote, which passes it. */
     QF.result = buildQuote(S, {
+      tenantId: tenantOf(S),
       customerId: QF.customerId, origin: QF.origin, destination: QF.destination, mode: QF.mode,
       containerType: QF.eq, containerQuantity: QF.qty, incoterm: QF.incoterm,
       consignment: cons, urgency: QF.urgency,
