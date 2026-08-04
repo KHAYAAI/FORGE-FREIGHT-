@@ -4,8 +4,9 @@ An 8½-minute screen recording of `console/forge-freight-console.html`, driven b
 `console/tour.mjs`. Nothing in it is mocked up: every number on screen is
 computed by the same modules the API imports, and every click is a real click.
 
-Recorded at 1600×900. The video is not committed — it is ~46 MB as VP8/WebM and
-~34 MB as H.264/MP4, both over what belongs in the tree. Re-record it with:
+Recorded at 1600×900. The video is not committed — the capture is ~46 MB of
+VP8/WebM, and ~20 MB re-encoded to H.264/MP4 at 15 fps, which is still more than
+belongs in the tree. Re-record it with:
 
 ```
 node console/tour.mjs          # writes tour-out/ next to the console
@@ -48,4 +49,13 @@ There is none — the captions are burned in. The container has no system ffmpeg
 and Playwright's bundled encoder offers only VP8 in WebM, so the recording is
 silent by construction. The MP4 is a re-encode of that WebM through the ffmpeg
 binary `imageio-ffmpeg` ships, for the players that will not take WebM
-(PowerPoint, Keynote).
+(PowerPoint, Keynote):
+
+```
+ffmpeg -i tour-out/forge-freight-console-tour.webm \
+  -c:v libx264 -preset veryslow -crf 27 -r 15 -pix_fmt yuv420p \
+  -movflags +faststart -an tour-out/forge-freight-console-tour.mp4
+```
+
+15 fps costs a screencast nothing — the screen is static between clicks — and
+halves the file.
