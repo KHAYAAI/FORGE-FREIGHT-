@@ -1,0 +1,39 @@
+name: Regenerate console tour
+
+on:
+  push:
+    branches: [claude/freight-forwarding-oss-stack-0uc9mf]
+    paths: [console/**]
+
+jobs:
+  tour:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: console
+
+      - name: Record tour
+        run: node tour.mjs
+        working-directory: console
+        env:
+          TOUR_OUT: tour-out
+
+      - name: Upload to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: console/tour-out/forge-freight-console-tour.mp4
+          tag_name: console-tour-latest
+          prerelease: true
+          body: |
+            Automated console tour recording.
+            Duration: ~8.5 minutes
+            Chapters: 14 (price → book → move → clear → invoice → match → query → pay)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
