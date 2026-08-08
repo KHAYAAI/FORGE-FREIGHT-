@@ -15,15 +15,27 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Install dependencies
-        run: npm ci
-        working-directory: console
+      - name: Install Playwright
+        run: |
+          mkdir -p "$HOME/pw-tour"
+          cd "$HOME/pw-tour"
+          npm init -y >/dev/null
+          npm install playwright@latest
+          npx playwright install --with-deps chromium
 
       - name: Record tour
         run: node tour.mjs
         working-directory: console
         env:
           TOUR_OUT: tour-out
+          PLAYWRIGHT_MODULE: /home/runner/pw-tour/node_modules/playwright/index.mjs
+
+      - name: Encode MP4
+        run: |
+          sudo apt-get update && sudo apt-get install -y ffmpeg
+          ffmpeg -y -i console/tour-out/forge-freight-console-tour.webm \
+            -c:v libx264 -preset veryslow -crf 27 -r 15 -pix_fmt yuv420p \
+            -movflags +faststart -an console/tour-out/forge-freight-console-tour.mp4
 
       - name: Upload to release
         uses: softprops/action-gh-release@v2

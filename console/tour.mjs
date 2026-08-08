@@ -29,7 +29,7 @@ await fs.mkdir(path.join(OUT, "frames"), { recursive: true });
 await fs.mkdir(path.join(OUT, "raw"), { recursive: true });
 
 const browser = await chromium.launch({
-  executablePath: process.env.CHROMIUM_PATH || "/opt/pw-browsers/chromium",
+  ...(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {}),
   args: ["--force-device-scale-factor=1", "--hide-scrollbars"],
 });
 const ctx = await browser.newContext({
