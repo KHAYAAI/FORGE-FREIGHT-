@@ -1,13 +1,23 @@
 name: Regenerate console tour
 
 on:
+  workflow_dispatch:
   push:
     branches: [claude/freight-forwarding-oss-stack-0uc9mf]
-    paths: [console/**]
+    # The workflow itself is in the trigger set: a change to how the tour is
+    # recorded or released should re-record and re-release it.
+    paths:
+      - console/**
+      - .github/workflows/console-tour.yml
 
 jobs:
   tour:
     runs-on: ubuntu-latest
+    # Creating the release needs write access to repository contents. The
+    # default GITHUB_TOKEN is read-only, which is why the upload step failed
+    # in 0s while every step before it succeeded.
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
