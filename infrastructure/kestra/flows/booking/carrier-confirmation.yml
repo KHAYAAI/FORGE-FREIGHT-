@@ -1,0 +1,72 @@
+id: carrier-confirmation
+namespace: forge.freight
+
+description: |
+  Chase carriers for confirmations on bookings we have already opened, and tell
+  a person once chasing has stopped working.
+
+  A shipment can exist internally with no carrier booking reference: the
+  operator booked it, the customer was told their cargo is moving, and the
+  carrier has not yet confirmed that space is actually held. Nothing watched
+  that gap before this flow. The first sign of trouble was a container with
+  nowhere to go.
+
+  Placement note. The brief drew this as `quote.accepted → booking.requested`.
+  That interval does not exist: `bookings.service.ts` emits QuoteAccepted and
+  ShipmentBooked inside one database transaction, so there is no gap between
+  them for a scheduler to occupy. The conversation with the carrier happens
+  *after* the internal booking is durable — which is also the only order in
+  which retrying is safe, because the booking is already committed and a retry
+  cannot create a second one.
+
+labels:
+  owner: operations
+  risk: unconfirmed-space
+
+variables:
+  chaseUrl: "{{ envs.freight_api_url }}/scheduled/carrier-confirmation"
+
+tasks:
+  - id: chase
+    type: io.kestra.plugin.core.http.Request
+    uri: "{{ vars.chaseUrl }}"
+    method: POST
+    contentType: application/json
+    body: "{}"
+    headers:
+      x-api-key: "{{ secret('FREIGHT_INGEST_API_KEY') }}"
+    options:
+      connectTimeout: PT10S
+      readIdleTimeout: PT2M
+    retry:
+      type: exponential
+      interval: PT1M
+      maxInterval: PT15M
+      maxAttempt: 4
+      behavior: RETRY_FAILED_TASK
+
+  - id: summarise
+    type: io.kestra.plugin.core.log.Log
+    message: |
+      Unconfirmed bookings scanned: {{ json(outputs.chase.body).scanned }}.
+      Chased {{ json(outputs.chase.body).requested }},
+      escalated {{ json(outputs.chase.body).escalated }},
+      {{ json(outputs.chase.body).duplicates }} already sent.
+      {{ json(outputs.chase.body).actions }}
+
+triggers:
+  - id: hourly
+    type: io.kestra.plugin.core.trigger.Schedule
+    # Hourly, but the ladder decides what is actually due: 6h, then 12h, then
+    # 24h between chases. Most runs do nothing, which is the intended
+    # behaviour — a carrier emailed every hour stops reading them.
+    cron: "30 * * * *"
+
+errors:
+  - id: alert
+    type: io.kestra.plugin.core.log.Log
+    level: ERROR
+    message: |
+      Carrier confirmation chase failed after retries. Nothing was lost: the
+      attempt ladder lives in the event log, not in this flow, so the next run
+      resumes exactly where this one stopped.

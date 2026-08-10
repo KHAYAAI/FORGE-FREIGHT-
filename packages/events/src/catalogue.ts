@@ -102,6 +102,24 @@ export const ShipmentBooked = defineEvent({
   }),
 });
 
+export const CarrierConfirmationRequested = defineEvent({
+  type: "carrier.confirmation_requested",
+  version: 1,
+  financial: false,
+  description:
+    "We asked the carrier to confirm a booking we have already opened internally. " +
+    "Emitted once per attempt: the attempt number is the retry ladder, and the " +
+    "count of these events for a shipment is how many times we have chased. " +
+    "Idempotent on (type, sourceRef) so a retried workflow cannot request twice.",
+  schema: z.object({
+    bookingId: z.string().uuid(),
+    /** 1-based. Backoff between attempts widens with this number. */
+    attempt: z.number().int().positive(),
+    /** Hours the shipment had been open, unconfirmed, when we asked. */
+    unconfirmedHours: z.number().int().nonnegative(),
+  }),
+});
+
 export const BookingRolled = defineEvent({
   type: "booking.rolled",
   version: 1,
@@ -481,6 +499,7 @@ export const catalogue = [
   QuoteIssued,
   QuoteAccepted,
   ShipmentBooked,
+  CarrierConfirmationRequested,
   BookingRolled,
   ContainerGatedIn,
   ContainerLoaded,

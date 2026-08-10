@@ -35,7 +35,12 @@ infrastructure secret is easier to rotate correctly than several.
 
 | Flow | Schedule | Calls | Replaces |
 |---|---|---|---|
-| `shipment-monitoring` | hourly | `POST /scheduled/sla-sweep` | `temporal/shipment-lifecycle` |
+| `tracking/monitoring` | hourly | `POST /scheduled/sla-sweep` | `temporal/shipment-lifecycle` |
+| `booking/carrier-confirmation` | hourly | `POST /scheduled/carrier-confirmation` | — |
+
+Flows are grouped by domain (`tracking/`, `booking/`, …). `WORKFLOWS.md` has the
+full design for the rest, and the rule that decides whether something belongs
+here at all.
 
 ### shipment-monitoring
 

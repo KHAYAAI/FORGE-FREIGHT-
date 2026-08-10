@@ -1,5 +1,9 @@
 import { Controller, HttpCode, Inject, Post, UseGuards } from "@nestjs/common";
 import { IngestKeyGuard } from "../ingest/ingest.controller.js";
+import {
+  CarrierConfirmationService,
+  type ConfirmationSweepResult,
+} from "./carrier-confirmation.service.js";
 import { SlaSweepService, type SweepResult } from "./sla-sweep.service.js";
 
 /**
@@ -19,6 +23,8 @@ import { SlaSweepService, type SweepResult } from "./sla-sweep.service.js";
 export class ScheduledController {
   constructor(
     @Inject(SlaSweepService) private readonly slaSweep: SlaSweepService,
+    @Inject(CarrierConfirmationService)
+    private readonly carrierConfirmation: CarrierConfirmationService,
   ) {}
 
   /**
@@ -33,5 +39,19 @@ export class ScheduledController {
   @HttpCode(200)
   async slaSweepRun(): Promise<SweepResult> {
     return this.slaSweep.sweep();
+  }
+
+  /**
+   * Chase carriers for confirmations on bookings already opened internally,
+   * and tell a person once the retry ladder is exhausted.
+   *
+   * Safe to call at any cadence: the ladder decides whether anything is due,
+   * and each request is keyed on the attempt number rather than the clock, so
+   * a re-run asks for the identical thing and the second write is rejected.
+   */
+  @Post("carrier-confirmation")
+  @HttpCode(200)
+  async carrierConfirmationRun(): Promise<ConfirmationSweepResult> {
+    return this.carrierConfirmation.sweep();
   }
 }

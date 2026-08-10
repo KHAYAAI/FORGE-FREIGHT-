@@ -21,6 +21,7 @@ name: forge-n8n
 services:
   n8n-db:
     image: postgres:16-alpine
+    restart: unless-stopped
     environment:
       POSTGRES_DB: n8n
       POSTGRES_USER: n8n
@@ -35,6 +36,7 @@ services:
 
   n8n:
     image: n8nio/n8n:latest
+    restart: unless-stopped
     depends_on:
       n8n-db:
         condition: service_healthy
