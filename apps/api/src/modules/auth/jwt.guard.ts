@@ -26,6 +26,10 @@ export class JwtAuthGuard implements CanActivate {
     if (PUBLIC_PATHS.has(req.path)) return true;
     // Tracking webhooks authenticate machine-to-machine via IngestKeyGuard.
     if (req.path.startsWith("/ingest/")) return true;
+    // Scheduled sweeps (Kestra) authenticate the same way. Kept as its own
+    // prefix rather than folded into /ingest so that "what may a scheduler
+    // call" stays answerable by reading the routes.
+    if (req.path.startsWith("/scheduled/")) return true;
 
     if (this.cfg.AUTH_MODE === "dev") {
       // Config refuses to boot with AUTH_MODE=dev in production; these

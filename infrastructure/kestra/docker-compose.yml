@@ -1,0 +1,89 @@
+# Kestra for local development.
+#
+# Kestra schedules work; it never holds shipment state. Its Postgres is its own
+# execution history and is unrelated to the Freight Core database — deleting
+# this volume loses run history, never freight.
+#
+#   cd infrastructure/kestra
+#   cp .env.example .env      # then fill in the API key
+#   docker compose up -d
+#   open http://localhost:8080
+#
+# Flows in ./flows are loaded on startup, so the YAML in git is the source of
+# truth rather than whatever was last edited in the UI.
+
+name: forge-kestra
+
+services:
+  kestra-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: kestra
+      POSTGRES_USER: kestra
+      POSTGRES_PASSWORD: ${KESTRA_DB_PASSWORD:?set KESTRA_DB_PASSWORD in .env}
+    volumes:
+      - kestra-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kestra -d kestra"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  kestra:
+    image: kestra/kestra:latest
+    # Kestra runs its own containers for some task types, so it needs the host
+    # socket. This is a development convenience — in production run it on its
+    # own host or with a scoped runner instead.
+    user: root
+    command: server standalone --worker-thread=2
+    depends_on:
+      kestra-db:
+        condition: service_healthy
+    environment:
+      KESTRA_CONFIGURATION: |
+        datasources:
+          postgres:
+            url: jdbc:postgresql://kestra-db:5432/kestra
+            username: kestra
+            password: ${KESTRA_DB_PASSWORD}
+        kestra:
+          server:
+            basic-auth:
+              enabled: true
+              username: ${KESTRA_ADMIN_USER:-admin@forgefreight.local}
+              password: ${KESTRA_ADMIN_PASSWORD:?set KESTRA_ADMIN_PASSWORD in .env}
+          repository:
+            type: postgres
+          queue:
+            type: postgres
+          storage:
+            type: local
+            local:
+              base-path: /app/storage
+
+      # Read by flows as {{ envs.freight_api_url }}. On Linux, host.docker.internal
+      # is provided by the extra_hosts entry below.
+      KESTRA_ENV_FREIGHT_API_URL: ${FREIGHT_API_URL:-http://host.docker.internal:3000}
+
+      # Read by flows as {{ secret('FREIGHT_INGEST_API_KEY') }}. Comes from .env,
+      # which is gitignored. Never commit a real value.
+      SECRET_FREIGHT_INGEST_API_KEY: ${FREIGHT_INGEST_API_KEY:?set FREIGHT_INGEST_API_KEY in .env}
+    ports:
+      - "8080:8080"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - kestra-data:/app/storage
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Flows are loaded from git, not authored in the UI.
+      - ./flows:/app/flows:ro
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/ping || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+
+volumes:
+  kestra-db:
+  kestra-data:

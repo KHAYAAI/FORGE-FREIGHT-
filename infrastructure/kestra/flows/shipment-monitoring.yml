@@ -1,0 +1,69 @@
+id: shipment-monitoring
+namespace: forge.freight
+
+description: |
+  Ask the Freight Core which shipments have passed an SLA without the milestone
+  that should have cleared it, and let it raise the exceptions.
+
+  Kestra decides *when*. It does not decide *what* — the rules live in
+  `apps/api/src/modules/shipments/sla-rules.ts`, are unit tested there, and are
+  the same rules whether this flow runs or someone calls the endpoint by hand.
+
+  This flow holds no shipment state. If it is deleted, nothing is lost except
+  the schedule; PostgreSQL remains the system of record.
+
+labels:
+  owner: operations
+  replaces: temporal/shipment-lifecycle
+
+variables:
+  # Endpoint only. The API key is a Kestra secret, never a variable, and never
+  # committed — see infrastructure/kestra/README.md.
+  sweepUrl: "{{ envs.freight_api_url }}/scheduled/sla-sweep"
+
+tasks:
+  - id: sweep
+    type: io.kestra.plugin.core.http.Request
+    uri: "{{ vars.sweepUrl }}"
+    method: POST
+    contentType: application/json
+    body: "{}"
+    headers:
+      x-api-key: "{{ secret('FREIGHT_INGEST_API_KEY') }}"
+    options:
+      # Generous: the sweep scans every in-flight shipment. Well short of the
+      # hourly schedule, so a slow run can never overlap the next one.
+      connectTimeout: PT10S
+      readIdleTimeout: PT2M
+    retry:
+      type: exponential
+      interval: PT30S
+      maxInterval: PT5M
+      maxAttempt: 4
+      # Safe to retry because the sweep is idempotent: an exception that is
+      # already open is not raised twice. A retry that duplicates the call
+      # produces no duplicate cards.
+      behavior: RETRY_FAILED_TASK
+
+  - id: summarise
+    type: io.kestra.plugin.core.log.Log
+    message: |
+      Scanned {{ json(outputs.sweep.body).scanned }} in-flight shipment(s);
+      raised {{ json(outputs.sweep.body).raised }} exception(s).
+      {{ json(outputs.sweep.body).breaches }}
+
+triggers:
+  - id: hourly
+    type: io.kestra.plugin.core.trigger.Schedule
+    # On the hour. Freight SLAs are measured in days, so an hour of latency in
+    # noticing costs nothing — the same trade OverdueSweepService already makes.
+    cron: "0 * * * *"
+
+errors:
+  - id: alert
+    type: io.kestra.plugin.core.log.Log
+    level: ERROR
+    message: |
+      SLA sweep failed after retries. No exceptions were raised this hour.
+      Nothing is lost: the next run re-evaluates every shipment from the event
+      log, so a missed run delays notice rather than skipping a breach.
