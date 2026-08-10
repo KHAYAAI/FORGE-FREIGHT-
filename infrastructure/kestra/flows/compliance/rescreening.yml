@@ -1,0 +1,84 @@
+id: rescreening
+namespace: forge.freight
+
+description: |
+  Re-ask the sanctions question about counterparties whose answer has gone
+  stale — 30 days for a clear verdict, 7 for a review or a hit.
+
+  A party is screened once, on the day it is created, and its status is then
+  frozen forever. Sanctions lists are not frozen. A counterparty cleared in
+  March can be listed in August, and without this flow the platform would keep
+  quoting, booking and invoicing them without a murmur.
+
+  This is the clearest case in the system for a scheduler: no event of ours
+  will ever fire, because the change happens in someone else's database. The
+  only possible trigger is the passage of time.
+
+labels:
+  owner: compliance
+  risk: regulatory
+
+variables:
+  rescreenUrl: "{{ envs.freight_api_url }}/scheduled/rescreen-parties"
+
+tasks:
+  - id: rescreen
+    type: io.kestra.plugin.core.http.Request
+    uri: "{{ vars.rescreenUrl }}"
+    method: POST
+    contentType: application/json
+    body: "{}"
+    headers:
+      x-api-key: "{{ secret('FREIGHT_INGEST_API_KEY') }}"
+    options:
+      connectTimeout: PT10S
+      # Generous: up to 200 parties, each an external lookup. Still well inside
+      # the daily schedule, so a slow provider cannot cause runs to overlap.
+      readIdleTimeout: PT10M
+    retry:
+      type: exponential
+      interval: PT2M
+      maxInterval: PT30M
+      maxAttempt: 3
+      # Safe to retry: asking the same question twice returns the same answer
+      # and writes the same status.
+      behavior: RETRY_FAILED_TASK
+
+  - id: summarise
+    type: io.kestra.plugin.core.log.Log
+    message: |
+      Screened {{ json(outputs.rescreen.body).screened }} of
+      {{ json(outputs.rescreen.body).due }} due,
+      from {{ json(outputs.rescreen.body).scanned }} parties on file.
+      Skipped (screening not configured): {{ json(outputs.rescreen.body).skipped }}.
+      Verdicts changed: {{ json(outputs.rescreen.body).changed }}
+
+  # A verdict moving is the entire reason this job exists. Everything else is
+  # housekeeping, so it gets its own loud line rather than being buried in the
+  # run summary above.
+  - id: flag_changes
+    type: io.kestra.plugin.core.flow.If
+    condition: "{{ json(outputs.rescreen.body).changed | length > 0 }}"
+    then:
+      - id: changed
+        type: io.kestra.plugin.core.log.Log
+        level: WARN
+        message: |
+          SANCTIONS VERDICT CHANGED — a person must look at this today.
+          {{ json(outputs.rescreen.body).changed }}
+
+triggers:
+  - id: daily
+    type: io.kestra.plugin.core.trigger.Schedule
+    # 02:15 UTC — after the lists most providers publish overnight, and before
+    # anyone starts quoting for the day.
+    cron: "15 2 * * *"
+
+errors:
+  - id: alert
+    type: io.kestra.plugin.core.log.Log
+    level: ERROR
+    message: |
+      Re-screening failed after retries. Verdicts are now a day staler than
+      intended; nothing is lost, because the next run re-selects everything due
+      and the backlog is drained oldest-verdict-first.
