@@ -9,5 +9,6 @@ import { QuotingService } from "./quoting.service.js";
   imports: [RatesModule, ConsignmentsModule],
   controllers: [QuotingController],
   providers: [QuotingService, QuotePdfService],
+  exports: [QuotingService],
 })
 export class QuotingModule {}

@@ -17,5 +17,6 @@ infra/aws/terraform.tfvars
 infra/aws/.terraform.lock.hcl
 infra/aws/tfplan
 
-# Kestra local secrets
+# Orchestration local secrets
 infrastructure/kestra/.env
+infrastructure/n8n/.env

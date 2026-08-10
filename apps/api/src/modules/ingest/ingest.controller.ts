@@ -17,6 +17,8 @@ import { CONFIG, type AppConfig } from "../../config.js";
 import { DcsaAdapter } from "./dcsa.adapter.js";
 import { EdifactIftstaAdapter, type EdifactStatusMap } from "./edifact.adapter.js";
 import { IngestService } from "./ingest.service.js";
+import { RfqSubmissionDto } from "./rfq.dto.js";
+import { RfqService } from "./rfq.service.js";
 import { TraccarAdapter } from "./traccar.adapter.js";
 
 /** Machine-to-machine key auth for tracking webhooks (not user JWTs). */
@@ -63,7 +65,10 @@ export class IngestController {
   private readonly dcsa = new DcsaAdapter();
   private readonly traccar = new TraccarAdapter();
 
-  constructor(@Inject(IngestService) private readonly ingest: IngestService) {}
+  constructor(
+    @Inject(IngestService) private readonly ingest: IngestService,
+    @Inject(RfqService) private readonly rfq: RfqService,
+  ) {}
 
   @Post("dcsa")
   async ingestDcsa(@Body() body: unknown) {
@@ -73,6 +78,20 @@ export class IngestController {
   @Post("traccar")
   async ingestTraccar(@Body() body: unknown) {
     return this.ingest.ingest(this.traccar.parse(body), this.traccar.source);
+  }
+
+  /**
+   * An RFQ from the outside world — an inbox, a form, a partner webhook.
+   *
+   * Unlike the tracking adapters this one can *refuse* in ways that are not
+   * errors: an unknown sender, a party under screening review, a lane with no
+   * valid rate. Those come back 200 with a status the caller can branch on,
+   * because they are answers rather than failures — n8n retrying them would
+   * accomplish nothing.
+   */
+  @Post("rfq")
+  async ingestRfq(@Body() body: unknown) {
+    return this.rfq.submit(RfqSubmissionDto.parse(body));
   }
 
   @Post("edifact")

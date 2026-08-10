@@ -1,0 +1,193 @@
+{
+  "name": "Customer RFQ → Freight Core",
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "errorWorkflow": ""
+  },
+  "nodes": [
+    {
+      "id": "trigger",
+      "name": "RFQ received",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [-620, 0],
+      "webhookId": "customer-rfq",
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "customer-rfq",
+        "responseMode": "responseNode",
+        "options": { "rawBody": false }
+      },
+      "notes": "Swap this for a Gmail/IMAP trigger once a mailbox is connected. Everything downstream reads the same fields, so the rest of the workflow does not change."
+    },
+    {
+      "id": "normalise",
+      "name": "Normalise + require a message id",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-400, 0],
+      "parameters": {
+        "jsCode": "// The one thing this workflow will not invent is the idempotency key.\n// Anything arriving over the internet eventually arrives twice; without a\n// stable id per request, a redelivered enquiry becomes a second quote to the\n// same customer for the same freight.\nconst body = $input.first().json.body ?? $input.first().json;\n\nconst messageId = body.messageId ?? body['message-id'] ?? body.Message_ID;\nif (!messageId) {\n  throw new Error('RFQ has no messageId — refusing rather than risking a duplicate quote');\n}\n\nconst required = ['customerEmail', 'origin', 'destination', 'mode', 'incoterm'];\nconst missing = required.filter((k) => !body[k]);\nif (missing.length) {\n  throw new Error(`RFQ is missing: ${missing.join(', ')}`);\n}\n\nreturn [{\n  json: {\n    messageId: String(messageId),\n    tenantId: $env.FREIGHT_TENANT_ID,\n    customerEmail: String(body.customerEmail).trim().toLowerCase(),\n    origin: String(body.origin).trim().toUpperCase(),\n    destination: String(body.destination).trim().toUpperCase(),\n    mode: String(body.mode).trim().toUpperCase(),\n    containerType: body.containerType ?? null,\n    quantity: Number(body.quantity ?? 1),\n    incoterm: String(body.incoterm).trim().toUpperCase(),\n    ...(body.consignment ? { consignment: body.consignment } : {}),\n  },\n}];"
+      }
+    },
+    {
+      "id": "submit",
+      "name": "Freight Core — POST /ingest/rfq",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-160, 0],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.FREIGHT_API_URL }}/ingest/rfq",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "x-api-key", "value": "={{ $env.FREIGHT_INGEST_API_KEY }}" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "timeout": 30000,
+          "response": { "response": { "neverError": false } }
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "notes": "Retries are safe: the API keys the quote on rfq:<messageId>, and the (type, source_ref) unique index means a repeated call returns the original quote instead of issuing a second one."
+    },
+    {
+      "id": "route",
+      "name": "What did it decide?",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [80, 0],
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "outputKey": "quoted",
+              "conditions": {
+                "options": { "caseSensitive": true, "version": 2 },
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "operator": { "type": "string", "operation": "equals" },
+                    "leftValue": "={{ $json.status }}",
+                    "rightValue": "QUOTED"
+                  }
+                ]
+              }
+            },
+            {
+              "outputKey": "needs a human",
+              "conditions": {
+                "options": { "caseSensitive": true, "version": 2 },
+                "combinator": "or",
+                "conditions": [
+                  {
+                    "operator": { "type": "string", "operation": "equals" },
+                    "leftValue": "={{ $json.status }}",
+                    "rightValue": "NEEDS_ONBOARDING"
+                  },
+                  {
+                    "operator": { "type": "string", "operation": "equals" },
+                    "leftValue": "={{ $json.status }}",
+                    "rightValue": "NEEDS_SCREENING_REVIEW"
+                  }
+                ]
+              }
+            },
+            {
+              "outputKey": "no rate",
+              "conditions": {
+                "options": { "caseSensitive": true, "version": 2 },
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "operator": { "type": "string", "operation": "equals" },
+                    "leftValue": "={{ $json.status }}",
+                    "rightValue": "NO_RATE"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "options": { "fallbackOutput": "extra" }
+      },
+      "notes": "The API answers 200 for all four outcomes. A refused RFQ is a business answer, not a transport failure — returning 5xx would make n8n retry a lane that will never price."
+    },
+    {
+      "id": "quoted",
+      "name": "Quoted",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [340, -180],
+      "notes": "Next: send the quote PDF to the customer via GET /quotes/{id}/pdf. Kept out of this slice so one thing is proven at a time."
+    },
+    {
+      "id": "human",
+      "name": "Hand to a person",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [340, -20],
+      "notes": "Unknown sender, or a party still under denied-party screening. Onboarding a customer automatically would mean quoting before screening resolves, which is how you price freight for a sanctioned counterparty. Next: post to the ops channel."
+    },
+    {
+      "id": "norate",
+      "name": "No rate for this lane",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [340, 140],
+      "notes": "The engine refuses lanes it holds no valid card for, and service levels it cannot meet. That is an answer to give the customer, not an error to retry."
+    },
+    {
+      "id": "unknown",
+      "name": "Unrecognised status",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [340, 300],
+      "notes": "Dead letter. If the API grows a status this workflow does not know, it lands here visibly rather than being silently treated as success."
+    },
+    {
+      "id": "respond",
+      "name": "Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [620, 0],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}"
+      }
+    }
+  ],
+  "connections": {
+    "RFQ received": {
+      "main": [[{ "node": "Normalise + require a message id", "type": "main", "index": 0 }]]
+    },
+    "Normalise + require a message id": {
+      "main": [[{ "node": "Freight Core — POST /ingest/rfq", "type": "main", "index": 0 }]]
+    },
+    "Freight Core — POST /ingest/rfq": {
+      "main": [[{ "node": "What did it decide?", "type": "main", "index": 0 }]]
+    },
+    "What did it decide?": {
+      "main": [
+        [{ "node": "Quoted", "type": "main", "index": 0 }],
+        [{ "node": "Hand to a person", "type": "main", "index": 0 }],
+        [{ "node": "No rate for this lane", "type": "main", "index": 0 }],
+        [{ "node": "Unrecognised status", "type": "main", "index": 0 }]
+      ]
+    },
+    "Quoted": { "main": [[{ "node": "Respond", "type": "main", "index": 0 }]] },
+    "Hand to a person": { "main": [[{ "node": "Respond", "type": "main", "index": 0 }]] },
+    "No rate for this lane": { "main": [[{ "node": "Respond", "type": "main", "index": 0 }]] },
+    "Unrecognised status": { "main": [[{ "node": "Respond", "type": "main", "index": 0 }]] }
+  }
+}

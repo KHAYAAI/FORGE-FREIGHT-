@@ -39,6 +39,13 @@ export interface IssueQuoteInput extends QuoteRequest {
   consignment?: CreateConsignment;
   consignmentId?: string;
   actor: EventActor;
+  /**
+   * Idempotency key for machine-originated quotes — an inbound RFQ's message
+   * id, for example. Carried onto the QuoteIssued event, where the
+   * `(type, source_ref)` unique index makes a redelivered request a no-op
+   * rather than a second quote for the same enquiry.
+   */
+  sourceRef?: string;
 }
 
 @Injectable()
@@ -133,6 +140,7 @@ export class QuotingService {
       definition: QuoteIssued,
       tenantId: input.tenantId,
       actor: input.actor,
+      sourceRef: input.sourceRef,
       payload: {
         quoteId,
         customerId: input.customerId,
