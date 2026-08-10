@@ -11,6 +11,12 @@ hand.
 
 ## Running it
 
+> **Run this on your own machine.** Agent and CI containers generally have no
+> Docker daemon, so nothing here can be started from one — `docker compose up -d`
+> is a local step. The YAML and compose files are reviewed and committed, but
+> "it started and the UI came up" is a check only you can perform.
+
+
 ```bash
 cd infrastructure/kestra
 cp .env.example .env        # fill in FREIGHT_INGEST_API_KEY
