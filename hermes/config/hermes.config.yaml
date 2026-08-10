@@ -1,0 +1,68 @@
+# Hermes configuration for the Forge Freight autonomous layer.
+#
+# Hermes is the reasoning layer. It reaches the platform through the Freight
+# MCP server and nothing else — it holds no database credentials, and there is
+# no path from a skill to Postgres that does not pass through the authenticated
+# Freight Core API.
+#
+# Adapted from a reference configuration, with the tool surface and the
+# autonomy stance corrected for this platform. See hermes/TOOLS.md for the
+# contract, and docs/target-architecture.md for where this sits.
+
+profiles:
+  freight:
+    skills_dir: /app/skills
+    skills:
+      - carrier-selection
+      - shipment-analysis
+      - exception-analysis
+      - pricing-analysis
+      - document-analysis
+      - post-shipment-analysis   # blocked until the outcome tables exist
+
+    mcp_servers:
+      freight-core:
+        transport: http
+        url: ${FREIGHT_MCP_URL}          # e.g. http://freight-mcp:9000/mcp
+        # The server exposes read-only tools. Not "write tools that are
+        # disabled" — tools that were never built. See the note below.
+
+    # ------------------------------------------------------------------
+    # Autonomy
+    # ------------------------------------------------------------------
+    # supervised: Hermes reads, reasons and proposes. A person decides.
+    #
+    # This is the only supported mode today, and not because the switch is
+    # missing. The write tools do not exist in the MCP server, so flipping
+    # this to something else would change nothing except the honesty of the
+    # file. When write tools are justified they arrive individually, each with
+    # a ceiling in config/autonomy-policy.yaml, lowest risk first.
+    autonomy: supervised
+
+    safety:
+      # Hermes never owns freight data. The Freight Core is the system of
+      # record and the only writer.
+      never_modify_core_code: true
+      never_access_database: true
+
+      # Every tool call is logged with an agent id, the arguments and the
+      # outcome. An action that cannot be reconstructed afterwards is a defect;
+      # freight is a regulated trade and "the agent did something" is not an
+      # audit trail.
+      audit_every_tool_call: true
+
+      # A proposal is not a policy. No suggestion from this layer reaches
+      # production routing, pricing or booking without a human approving it —
+      # at any autonomy level, permanently.
+      proposals_require_human_approval: true
+
+      # Skills must not call tools that do not exist, and must not substitute
+      # a different tool and present the result as though it were the one
+      # asked for. Missing data is reported as missing.
+      no_fabricated_tool_results: true
+
+    limits:
+      # A reasoning loop that hangs on a slow upstream is worse than one that
+      # fails: it holds the question open while the answer goes stale.
+      tool_timeout_seconds: 30
+      max_tools_per_task: 25

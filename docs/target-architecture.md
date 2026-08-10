@@ -330,7 +330,7 @@ Additive in every case; no existing behaviour is replaced.
 
 | Service | Path | Notes |
 |---|---|---|
-| `freight-mcp` | `services/freight-mcp/` | MCP server over the API. Read-only tools first. Authenticated, allowlisted, every call logged. |
+| `freight-mcp` | `services/freight-mcp/` | MCP server over the API. **Read-only tools only** — not write tools behind a flag. Contract in `hermes/TOOLS.md`; the skills that consume it are in `hermes/skills/`. |
 | n8n | `infrastructure/n8n/` | Deployment + credentials only. No custom code. |
 | Simulator | `services/freight-sim/` | Synthetic shipments with injected delay, congestion, rejection. The only honest way to test whether the loop learns. |
 
