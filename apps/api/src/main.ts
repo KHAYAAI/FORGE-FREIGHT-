@@ -37,6 +37,24 @@ async function bootstrap() {
   console.log(
     `FORGE Freight API listening on :${cfg.PORT} (auth=${cfg.AUTH_MODE}, outbox=${cfg.KAFKA_BROKERS ? "on" : "off"})`,
   );
+
+  // The SLA sweep, carrier-confirmation chase and sanctions re-screen all run
+  // unattended on a schedule (see infrastructure/kestra/) and raise exceptions
+  // or escalations that today land ONLY on the ops kanban
+  // (GET /ops/exceptions) unless Novu is configured — NotificationsService
+  // degrades silently by design. That silence is fine for a screen someone is
+  // watching; it is a real gap for a compliance HIT at 3am. This is loud on
+  // purpose: config/autonomy-policy.yaml cannot fix this, only NOVU_API_KEY
+  // (plus a real workflow on the Novu dashboard) can.
+  if (!cfg.NOVU_API_KEY) {
+    console.warn(
+      "[paging] NOVU_API_KEY is not set. Scheduled automations (SLA sweep, " +
+        "carrier confirmation, sanctions re-screening) will raise exceptions " +
+        "that are visible ONLY on the ops kanban — nobody is paged. See " +
+        "config/autonomy-policy.yaml, section 'paging', before relying on " +
+        "any of these in production.",
+    );
+  }
 }
 
 bootstrap();

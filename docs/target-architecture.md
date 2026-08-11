@@ -291,6 +291,17 @@ no path that bypasses it, because none is built.
 `config/autonomy-policy.yaml`. The agent decides what it wants to do; the policy
 engine decides whether it may. A prompt is not an access-control mechanism.
 
+**Status: the file exists and is enforced today, but only for the three live
+scheduled automations** (SLA sweep, carrier confirmation, sanctions
+re-screening — see `infrastructure/kestra/WORKFLOWS.md`) — those sections are
+validated at API boot and the process refuses to start if they're missing or
+malformed. The agent-write-action governance below (`carrier_booking`,
+`price_adjustment`, etc.) is captured in the file's `not_yet_enforced` section
+with the same numbers, but **no code reads that section** — there are no
+write tools for it to gate, since `services/freight-mcp/` is read-only by
+construction (see `hermes/TOOLS.md`). This subsection stays the design target
+for when that changes.
+
 ```yaml
 customer_notification:    { level: automatic }
 document_validation:      { level: automatic }

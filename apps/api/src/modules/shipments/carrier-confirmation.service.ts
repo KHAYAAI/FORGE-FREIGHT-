@@ -15,6 +15,7 @@ import {
 import { DB } from "../db/db.module.js";
 import { appendEventIdempotent } from "../db/event-store.js";
 import {
+  BACKOFF_HOURS,
   nextAction,
   requestSourceRef,
   type UnconfirmedBooking,
@@ -49,7 +50,10 @@ export class CarrierConfirmationService {
 
   constructor(@Inject(DB) private readonly db: Db) {}
 
-  async sweep(now: Date = new Date()): Promise<ConfirmationSweepResult> {
+  async sweep(
+    now: Date = new Date(),
+    ladder: readonly number[] = BACKOFF_HOURS,
+  ): Promise<ConfirmationSweepResult> {
     const candidates = await this.loadUnconfirmed();
     const result: ConfirmationSweepResult = {
       scanned: candidates.length,
@@ -60,7 +64,7 @@ export class CarrierConfirmationService {
     };
 
     for (const b of candidates) {
-      const action = nextAction(b, now);
+      const action = nextAction(b, now, ladder);
       if (!action) continue;
 
       if (action.kind === "REQUEST") {

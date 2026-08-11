@@ -4,6 +4,15 @@ One flow is built. The rest are designed here, grounded in the state machines
 and endpoints that actually exist, so they can be implemented one at a time
 without re-deciding the architecture each time.
 
+**The thresholds these flows run against live in `config/autonomy-policy.yaml`,
+not in this file and not hardcoded in the endpoints they call.** SLA days,
+the carrier confirmation chase ladder, and the sanctions re-screen intervals
+are all read from that file at API boot — see
+`apps/api/src/modules/policy/autonomy-policy.service.ts` — and the API
+refuses to start if it is missing or malformed. Changing an operating
+boundary is editing that file and redeploying the API, not touching a Kestra
+flow.
+
 ---
 
 ## The rule that decides what belongs here

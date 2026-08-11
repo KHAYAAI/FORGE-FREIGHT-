@@ -1,5 +1,6 @@
 import { Controller, HttpCode, Inject, Post, UseGuards } from "@nestjs/common";
 import { IngestKeyGuard } from "../ingest/ingest.controller.js";
+import { AutonomyPolicyService } from "../policy/autonomy-policy.service.js";
 import { RescreeningService, type RescreenResult } from "./rescreening.service.js";
 
 /**
@@ -16,11 +17,15 @@ import { RescreeningService, type RescreenResult } from "./rescreening.service.j
 export class ScheduledComplianceController {
   constructor(
     @Inject(RescreeningService) private readonly rescreening: RescreeningService,
+    @Inject(AutonomyPolicyService) private readonly policy: AutonomyPolicyService,
   ) {}
 
   /**
    * Re-ask the sanctions question about counterparties whose answer has gone
-   * stale — 30 days for a clear verdict, 7 for a review or a hit.
+   * stale. Intervals and the per-run cap come from
+   * `config/autonomy-policy.yaml` — this is the one endpoint in the codebase
+   * with real regulatory exposure if the numbers are wrong, so they are not
+   * buried in a constant.
    *
    * Safe at any cadence. Asking twice returns the same answer and writes the
    * same status; the per-run cap means a large book drains over several runs
@@ -29,6 +34,10 @@ export class ScheduledComplianceController {
   @Post("rescreen-parties")
   @HttpCode(200)
   async rescreen(): Promise<RescreenResult> {
-    return this.rescreening.sweep();
+    return this.rescreening.sweep(
+      new Date(),
+      this.policy.rescreenMaxPerRun,
+      this.policy.rescreenAfterDays,
+    );
   }
 }

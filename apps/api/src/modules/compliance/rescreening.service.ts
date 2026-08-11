@@ -5,6 +5,7 @@ import { PartyScreened } from "@forge-freight/events";
 import { DB } from "../db/db.module.js";
 import {
   MAX_PER_RUN,
+  RESCREEN_AFTER_DAYS,
   selectForRescreening,
   type ScreenableParty,
   type ScreeningStatus,
@@ -49,12 +50,13 @@ export class RescreeningService {
   async sweep(
     now: Date = new Date(),
     limit: number = MAX_PER_RUN,
+    intervals: Record<ScreeningStatus, number> = RESCREEN_AFTER_DAYS,
   ): Promise<RescreenResult> {
     const all = await this.loadParties();
     // Uncapped first so the report can say how deep the backlog is, then
     // capped for the work actually done this run. An operator needs to know
     // the queue is 900 long even when only 200 were asked.
-    const allDue = selectForRescreening(all, now, Number.MAX_SAFE_INTEGER);
+    const allDue = selectForRescreening(all, now, Number.MAX_SAFE_INTEGER, intervals);
     const batch = allDue.slice(0, limit);
 
     const result: RescreenResult = {

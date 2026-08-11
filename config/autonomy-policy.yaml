@@ -1,0 +1,155 @@
+# Forge Freight — autonomy policy
+#
+# This file is the answer to "what is this platform allowed to do without
+# asking a person first." It is loaded once at API boot by
+# apps/api/src/modules/policy/autonomy-policy.service.ts, validated, and the
+# process REFUSES TO START if it is missing or malformed — the same
+# fail-fast discipline apps/api/src/config.ts uses for environment variables.
+# No silent fallback to defaults in production.
+#
+# Two kinds of section in this file, and they are not the same kind of thing:
+#
+#   LIVE      — read by real, running code today. Changing a number here
+#               changes what the platform does on its next deploy, with no
+#               code change required.
+#   NOT YET   — placeholders for automations that do not exist yet. Nothing
+#               reads these. They exist so the numbers get decided by a
+#               person ahead of the code that will need them, rather than
+#               invented by whoever writes that code under deadline.
+#
+# Every number below is a placeholder. Replace it with what you'd actually
+# stand behind if a customer, an auditor, or a carrier asked you to justify
+# it. "Someone decided the operating boundaries" is not true until this file
+# says something a specific person chose on purpose.
+
+# =============================================================================
+# LIVE — read by apps/api/src/modules/shipments/sla-sweep.service.ts
+# =============================================================================
+# The hourly sweep that raises an exception when a shipment has passed an SLA
+# without the milestone that should have cleared it. See
+# apps/api/src/modules/shipments/sla-rules.ts for the logic these feed.
+shipment_sla:
+  # Days after booking before a missing departure raises CONGESTION_DELAY.
+  # PLACEHOLDER — was hardcoded as 14. Replace with your real cutoff.
+  departure_days: 14
+
+  # Extra days of grace added to planned transit before a missing arrival
+  # raises CONGESTION_DELAY.
+  # PLACEHOLDER — was hardcoded as 7.
+  arrival_grace_days: 7
+
+  # Assumed transit when a quote's rate card carried none. Known limitation:
+  # bookings.service.ts currently starts every shipment with transitDays:
+  # null, so this fallback is doing more work than it should. See
+  # infrastructure/kestra/WORKFLOWS.md, flow #1, for the fix.
+  # PLACEHOLDER — was hardcoded as 30.
+  fallback_transit_days: 30
+
+  # Days after arrival before a missing customs release raises CUSTOMS_QUERY.
+  # PLACEHOLDER — was hardcoded as 10.
+  customs_release_days: 10
+
+# =============================================================================
+# LIVE — read by apps/api/src/modules/shipments/carrier-confirmation.service.ts
+# =============================================================================
+# The ladder that chases a carrier for confirmation on a booking we have
+# already opened internally, and escalates to a person once it gives up.
+carrier_confirmation:
+  # Hours to wait before each chase. One entry per attempt, in order — the
+  # ops-facing meaning of "how patient are we before this looks like a
+  # carrier that lost the booking."
+  # PLACEHOLDER — was hardcoded as [6, 12, 24].
+  backoff_hours: [6, 12, 24]
+
+  # After the ladder above is exhausted with no confirmation, escalate to a
+  # person exactly once (see carrier-confirmation-rules.ts: "escalate once,
+  # then stay quiet"). This is not a separate timeout — it fires the moment
+  # the last backoff_hours entry has passed with still no confirmation.
+
+# =============================================================================
+# LIVE — read by apps/api/src/modules/compliance/rescreening.service.ts
+# =============================================================================
+# How long a sanctions screening verdict is trusted before it is asked again.
+# This is the one section in this file with real regulatory exposure: get it
+# too loose and a party sanctioned after onboarding keeps trading unnoticed.
+sanctions_rescreening:
+  # Days before a CLEAR verdict is re-asked. The common case, so this is the
+  # number to weigh against your actual screening provider's cost per call.
+  # PLACEHOLDER — was hardcoded as 30.
+  clear_after_days: 30
+
+  # Days before a REVIEW or HIT verdict is re-asked. Deliberately shorter
+  # than clear_after_days: a delisting freeing a customer to trade again
+  # matters more urgently than re-confirming a clean one.
+  # PLACEHOLDER — was hardcoded as 7.
+  review_or_hit_after_days: 7
+
+  # Parties re-screened in a single run. Caps the batch so a large book does
+  # not become thousands of provider calls in one sweep; oldest-verdict-first
+  # drains the backlog steadily rather than starving the tail (see
+  # rescreening-rules.ts for why order matters here, not just the cap).
+  # PLACEHOLDER — was hardcoded as 200.
+  max_per_run: 200
+
+# =============================================================================
+# ESCALATION — where a raised exception or a HIT verdict actually goes
+# =============================================================================
+# This section is honesty, not enforcement. As of this commit, escalations
+# from every automation above land in the ops exception kanban
+# (GET /ops/exceptions) and NOWHERE ELSE unless NOVU_API_KEY is configured —
+# see apps/api/src/modules/notifications/notifications.service.ts, which
+# degrades silently by design (logged and skipped, never a hard failure).
+#
+# The API now logs a WARN at boot if it is running without NOVU_API_KEY —
+# see apps/api/src/main.ts — so this stops being a silent gap. But this file
+# cannot fix it; only setting NOVU_API_KEY and configuring a real workflow
+# on the Novu dashboard can. Until that is done, treat every automation
+# below as "raises a card on a kanban board someone has to be looking at."
+paging:
+  # Who is actually responsible for clearing the ops kanban day to day.
+  # PLACEHOLDER — this is a name or a rotation, not a system.
+  ops_owner: "REPLACE ME — e.g. ops@yourcompany.example, or a named person"
+
+  # Who is told immediately (not via the kanban) on a sanctions HIT.
+  # A HIT is the one finding in this whole file that should never wait for
+  # someone to happen to look at a screen.
+  # PLACEHOLDER
+  compliance_hit_owner: "REPLACE ME"
+
+# =============================================================================
+# NOT YET ENFORCED — no code reads this section
+# =============================================================================
+# These describe write actions the platform does not perform today. The
+# Freight MCP server (services/freight-mcp/) exposes read-only tools and
+# nothing else — see hermes/TOOLS.md for why that boundary is structural
+# rather than a setting. Nothing here can be "turned on" by editing a
+# number; a write tool has to be built first, deliberately, one at a time,
+# lowest risk first, and wired to read its ceiling from a section like this.
+#
+# Written now so the numbers get decided ahead of the code, not invented by
+# whoever builds the first write tool under deadline. Keep this section
+# honest: if you start enforcing one of these, move it above this line and
+# say in this file's history which commit made it real.
+not_yet_enforced:
+  carrier_booking:
+    # Below this shipment value, a future auto-booking tool could act
+    # without approval. Above it, always a human. PLACEHOLDER.
+    max_value_zar: 100000
+
+  price_adjustment:
+    # Maximum percentage a future agent could adjust a quoted price by
+    # without approval. PLACEHOLDER.
+    max_variance_pct: 5
+
+  shipment_cancellation:
+    requires_approval: true # not overridable — cancellation is always a person
+
+  customer_refund:
+    requires_approval: true # not overridable
+
+  production_policy_change:
+    # e.g. "deprioritise Carrier A on this lane" — the output of the learning
+    # loop in docs/target-architecture.md, once it exists. A proposal that
+    # cannot be backtested against real shipment history cannot be approved,
+    # and nothing here or in code may skip that step.
+    requires_approval: true # not overridable, permanently, at any autonomy level

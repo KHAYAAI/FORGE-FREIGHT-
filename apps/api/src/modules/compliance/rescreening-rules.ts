@@ -53,11 +53,21 @@ export interface ScreenableParty {
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-/** Whether this party's verdict has gone stale. */
-export function isDue(p: ScreenableParty, now: Date): boolean {
+/**
+ * Whether this party's verdict has gone stale.
+ *
+ * `intervals` defaults to `RESCREEN_AFTER_DAYS` so every existing call site
+ * and test is unaffected; the service layer passes the operator-configured
+ * intervals from `config/autonomy-policy.yaml` explicitly instead.
+ */
+export function isDue(
+  p: ScreenableParty,
+  now: Date,
+  intervals: Record<ScreeningStatus, number> = RESCREEN_AFTER_DAYS,
+): boolean {
   if (!p.lastScreenedAt) return true;
   const ageDays = (now.getTime() - p.lastScreenedAt.getTime()) / DAY_MS;
-  return ageDays >= RESCREEN_AFTER_DAYS[p.status];
+  return ageDays >= intervals[p.status];
 }
 
 /**
@@ -72,9 +82,10 @@ export function selectForRescreening(
   parties: readonly ScreenableParty[],
   now: Date,
   limit: number = MAX_PER_RUN,
+  intervals: Record<ScreeningStatus, number> = RESCREEN_AFTER_DAYS,
 ): ScreenableParty[] {
   return parties
-    .filter((p) => isDue(p, now))
+    .filter((p) => isDue(p, now, intervals))
     .sort((a, b) => {
       // Never-screened first: an unknown counterparty is the worst case.
       if (!a.lastScreenedAt && !b.lastScreenedAt) return 0;

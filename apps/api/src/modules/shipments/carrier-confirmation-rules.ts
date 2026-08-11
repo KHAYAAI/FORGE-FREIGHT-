@@ -68,14 +68,23 @@ const hoursSince = (from: Date, now: Date) =>
  *
  * Returns nothing when it is simply too early — which is most of the time, and
  * is what stops an hourly schedule turning into an hourly email to a carrier.
+ *
+ * `ladder` defaults to `BACKOFF_HOURS` so every existing call site and test
+ * is unaffected; the service layer passes the operator-configured ladder from
+ * `config/autonomy-policy.yaml` explicitly instead of relying on the default.
+ * Max attempts is the ladder's own length — a business that wants two chases
+ * or five gets that by changing the list, not a second number that could
+ * disagree with it.
  */
 export function nextAction(
   b: UnconfirmedBooking,
   now: Date,
+  ladder: readonly number[] = BACKOFF_HOURS,
 ): ConfirmationAction | null {
   const unconfirmedHours = hoursSince(b.bookedAt, now);
+  const maxAttempts = ladder.length;
 
-  if (b.attemptsMade >= MAX_ATTEMPTS) {
+  if (b.attemptsMade >= maxAttempts) {
     // The ladder is exhausted. Tell a person once, then stay quiet: an ops
     // board that repeats itself is an ops board nobody reads.
     if (b.escalated) return null;
@@ -86,14 +95,14 @@ export function nextAction(
       bookingId: b.bookingId,
       reference: b.reference,
       detail:
-        `No carrier confirmation after ${MAX_ATTEMPTS} attempts over ` +
+        `No carrier confirmation after ${maxAttempts} attempts over ` +
         `${unconfirmedHours}h. Space may not be held — confirm by phone.`,
     };
   }
 
-  // Backoff: the wait before attempt N is BACKOFF_HOURS[N-1], measured from
-  // the booking for the first chase and from the last chase thereafter.
-  const waitHours = BACKOFF_HOURS[b.attemptsMade]!;
+  // Backoff: the wait before attempt N is ladder[N-1], measured from the
+  // booking for the first chase and from the last chase thereafter.
+  const waitHours = ladder[b.attemptsMade]!;
   const since = b.lastAttemptAt ?? b.bookedAt;
   if (hoursSince(since, now) < waitHours) return null;
 
