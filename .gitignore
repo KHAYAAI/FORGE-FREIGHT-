@@ -20,3 +20,4 @@ infra/aws/tfplan
 # Orchestration local secrets
 infrastructure/kestra/.env
 infrastructure/n8n/.env
+services/freight-mcp/.env
