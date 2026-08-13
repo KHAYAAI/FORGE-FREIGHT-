@@ -1,5 +1,8 @@
 locals {
-  ecr_repo_names = ["api", "worker", "web"]
+  # kestra and n8n pull their public images directly (kestra/kestra,
+  # n8nio/n8n) — same as temporal/keycloak/yente in supporting.tf. freight-mcp
+  # is our own code, so it needs a repo like api/worker/web do.
+  ecr_repo_names = ["api", "worker", "web", "freight-mcp"]
 }
 
 resource "aws_ecr_repository" "app" {

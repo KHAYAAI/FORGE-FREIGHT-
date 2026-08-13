@@ -1,5 +1,8 @@
 locals {
-  log_services = ["api", "worker", "web", "redpanda", "temporal", "keycloak", "yente"]
+  log_services = [
+    "api", "worker", "web", "redpanda", "temporal", "keycloak", "yente",
+    "kestra", "n8n", "freight-mcp",
+  ]
 }
 
 resource "aws_cloudwatch_log_group" "svc" {

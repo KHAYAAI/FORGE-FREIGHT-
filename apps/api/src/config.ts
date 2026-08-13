@@ -38,6 +38,16 @@ const ConfigSchema = z
     /** API key external tracking systems use on /ingest/* webhooks. */
     INGEST_API_KEY: z.string().default(""),
 
+    /**
+     * API key a read-only agent (freight-mcp) presents on `x-agent-key`,
+     * alongside `x-agent-tenant-id` naming the one tenant it may read.
+     * Empty = the agent-auth path in jwt.guard.ts never activates — normal
+     * Bearer/dev auth is unaffected either way. Optional even in production:
+     * unlike INGEST_API_KEY, nothing in the platform requires an agent to be
+     * connected, so this is not on the required-in-production list below.
+     */
+    AGENT_API_KEY: z.string().default(""),
+
     /** yente screening endpoint, e.g. http://localhost:8000. Empty = dev skip. */
     YENTE_URL: z.string().default(""),
 

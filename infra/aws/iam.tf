@@ -25,9 +25,12 @@ resource "aws_iam_role_policy" "ecs_execution_secrets" {
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [{
-      Effect   = "Allow"
-      Action   = ["secretsmanager:GetSecretValue"]
-      Resource = [aws_secretsmanager_secret.db.arn]
+      Effect = "Allow"
+      Action = ["secretsmanager:GetSecretValue"]
+      # db: api/worker/Temporal/Keycloak/Kestra/n8n's RDS credentials.
+      # integration: the ingest/agent API keys and Kestra/n8n admin
+      # credentials generated in orchestration.tf.
+      Resource = [aws_secretsmanager_secret.db.arn, aws_secretsmanager_secret.integration.arn]
     }]
   })
 }

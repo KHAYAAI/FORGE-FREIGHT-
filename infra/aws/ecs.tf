@@ -9,6 +9,20 @@ resource "aws_ecs_cluster" "main" {
 
 # --- api ---------------------------------------------------------------
 
+# Kestra, n8n and freight-mcp (all in the `supporting` security group) call
+# api over this private Cloud Map name rather than the public ALB — the same
+# pattern redpanda/temporal/yente already use in supporting.tf.
+resource "aws_service_discovery_service" "api" {
+  name = "api"
+  dns_config {
+    namespace_id = aws_service_discovery_private_dns_namespace.main.id
+    dns_records {
+      ttl  = 10
+      type = "A"
+    }
+  }
+}
+
 resource "aws_ecs_task_definition" "api" {
   family                   = "${local.name}-api"
   requires_compatibilities = ["FARGATE"]
@@ -31,7 +45,6 @@ resource "aws_ecs_task_definition" "api" {
       { name = "KAFKA_BROKERS", value = "${aws_service_discovery_service.redpanda.name}.${aws_service_discovery_private_dns_namespace.main.name}:9092" },
       { name = "TEMPORAL_ADDRESS", value = "${aws_service_discovery_service.temporal.name}.${aws_service_discovery_private_dns_namespace.main.name}:7233" },
       { name = "YENTE_URL", value = "http://${aws_service_discovery_service.yente.name}.${aws_service_discovery_private_dns_namespace.main.name}:8000" },
-      { name = "INGEST_API_KEY", value = "" }, # set via console/Secrets Manager rotation — not committed to state as a literal
       { name = "ANTHROPIC_API_KEY", value = var.anthropic_api_key },
       { name = "AISSTREAM_API_KEY", value = var.aisstream_api_key },
       { name = "NOVU_API_KEY", value = var.novu_api_key },
@@ -41,6 +54,11 @@ resource "aws_ecs_task_definition" "api" {
     ]
     secrets = [
       { name = "DATABASE_URL", valueFrom = "${aws_secretsmanager_secret.db.arn}:url::" },
+      # Shared with Kestra/n8n (the scheduler/webhook callers) and freight-mcp
+      # (the read-only agent) below — one Terraform-generated value per key
+      # instead of the manually-rotated blank literal this used to be.
+      { name = "INGEST_API_KEY", valueFrom = "${aws_secretsmanager_secret.integration.arn}:ingest_api_key::" },
+      { name = "AGENT_API_KEY", valueFrom = "${aws_secretsmanager_secret.integration.arn}:agent_api_key::" },
     ]
     logConfiguration = {
       logDriver = "awslogs"
@@ -69,6 +87,10 @@ resource "aws_ecs_service" "api" {
     target_group_arn = aws_lb_target_group.api.arn
     container_name   = "api"
     container_port   = 3001
+  }
+
+  service_registries {
+    registry_arn = aws_service_discovery_service.api.arn
   }
 
   depends_on = [aws_lb_listener.http, aws_ecs_service.temporal, aws_ecs_service.redpanda]

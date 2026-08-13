@@ -25,8 +25,22 @@ not verified. Run `terraform plan` yourself before `apply` and read it.
 | ECS Fargate cluster, services, task defs for api/worker/web | `ecs.tf` |
 | ALB with host-based routing (api./app./auth.) + ACM cert | `alb.tf`, `dns.tf` |
 | Redpanda, Temporal, Keycloak, yente, OpenSearch — self-hosted on Fargate | `supporting.tf` |
+| Kestra (scheduler), n8n (integration), freight-mcp (read-only agent) | `orchestration.tf` |
 | IAM roles (ECS execution, api task, generic task) | `iam.tf` |
 | CloudWatch log groups per service | `observability.tf` |
+
+Kestra, n8n, and freight-mcp are the automation/integration/agent layer:
+Kestra runs the SLA sweep, carrier-confirmation chase, and sanctions
+re-screening on a schedule; n8n is customer RFQ intake; freight-mcp is the
+read-only MCP surface an agent (e.g. Hermes) reads through. All three sit in
+the `supporting` security group, reachable only from inside the VPC — none
+has a public ALB route. n8n and freight-mcp are both "one instance per
+tenant" (see their READMEs): `var.freight_tenant_id` gates both, and both
+deploy with `desired_count = 0` until it's set, since an unconfigured tenant
+means neither has anything safe to do. freight-mcp additionally requires
+`var.freight_mcp_desired_count` to be raised from its default of 0 — nothing
+in the platform depends on an agent being connected, so it stays off until
+you actually have one.
 
 Redpanda/Temporal/Keycloak/yente run as **single-task ECS services**, not
 managed AWS equivalents (MSK, Temporal Cloud, Cognito). This mirrors
@@ -95,17 +109,20 @@ aws ecs update-service --cluster forge-freight-production --service forge-freigh
 These are genuine operator actions, not gaps in the code — the same
 distinction `LAUNCH.md` draws for the non-AWS deployment path.
 
-1. **Create the `temporal` and `keycloak` logical databases** on the RDS
-   instance. Terraform provisions one RDS instance with `db_name` for the
-   application; Temporal and Keycloak each need their own database on the
-   same instance, and creating a database requires a live connection
-   Terraform doesn't have in this setup (no bastion/CI runner inside the VPC
-   wired up here). From a host that can reach RDS (a bastion, an ECS Exec
-   session into any running task, or a temporary security-group opening):
+1. **Create the `temporal`, `keycloak`, `kestra`, and `n8n` logical
+   databases** on the RDS instance. Terraform provisions one RDS instance
+   with `db_name` for the application; Temporal, Keycloak, Kestra, and n8n
+   each need their own database on the same instance, and creating a
+   database requires a live connection Terraform doesn't have in this setup
+   (no bastion/CI runner inside the VPC wired up here). From a host that can
+   reach RDS (a bastion, an ECS Exec session into any running task, or a
+   temporary security-group opening):
    ```sql
    CREATE DATABASE temporal;
    CREATE DATABASE temporal_visibility;
    CREATE DATABASE keycloak;
+   CREATE DATABASE kestra;
+   CREATE DATABASE n8n;
    ```
    Get the admin password with:
    ```bash
@@ -129,15 +146,31 @@ distinction `LAUNCH.md` draws for the non-AWS deployment path.
    a few minutes.
 5. **Secrets you must supply**, not generate: `anthropic_api_key`,
    `aisstream_api_key`, `novu_api_key` in `terraform.tfvars` (all optional —
-   each feature degrades gracefully when unset, per `.env.example`), and
-   `INGEST_API_KEY` — currently left blank in `ecs.tf`'s environment block on
-   purpose (a machine-to-machine webhook key shouldn't live in Terraform
-   state as plaintext). Set it via `aws ecs update-service` with a
-   `--task-definition` override referencing a Secrets Manager ARN, or extend
-   `rds.tf`'s secret pattern with a dedicated `aws_secretsmanager_secret` for
-   it — either way, treat plaintext task-definition env vars as fine for
-   non-secret config and Secrets Manager as required for anything that acts
-   as a credential.
+   each feature degrades gracefully when unset, per `.env.example`).
+   `INGEST_API_KEY` and `AGENT_API_KEY` are no longer manual — `orchestration.tf`
+   generates both with `random_password` and stores them in the
+   `${local.name}/integration` Secrets Manager secret (see
+   `output.integration_secret_arn`), shared consistently by api, Kestra, n8n,
+   and freight-mcp so nobody copy-pastes a key between consoles. You still
+   must set `freight_tenant_id` in `terraform.tfvars` before n8n or
+   freight-mcp will actually run — both are "one instance per tenant" and
+   deploy with `desired_count = 0` without it.
+6. **Kestra flows.** The container loads flows from its own filesystem, not
+   from a mounted `infrastructure/kestra/flows` directory like local
+   docker-compose does — ECS Fargate has no host bind-mount. Import the YAML
+   in `infrastructure/kestra/flows/` through Kestra's UI or API
+   (`http://kestra.<name>.internal:8080` from inside the VPC — see
+   `output.kestra_internal_url`) after first deploy. Same idea as the
+   Keycloak realm import above: the container starts empty, the flows in git
+   are the source of truth, and getting them in is a one-time operator step.
+7. **n8n workflows.** Same shape as Kestra flows: `infrastructure/n8n/workflows/`
+   is not mounted on ECS. Import `customer-rfq.json` through n8n's UI
+   (`output.n8n_internal_url`) after first deploy.
+8. **Known Fargate gap for Kestra:** locally, Kestra's docker-compose mounts
+   the host Docker socket so it can run container-based task types. Fargate
+   gives no such socket, so only HTTP/webhook/script-based flows — everything
+   built so far in `infrastructure/kestra/flows/` — work when deployed here.
+   Revisit if a future flow needs a Docker task type.
 
 ## CI/CD
 

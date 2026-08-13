@@ -6,9 +6,12 @@ import { TOOLS, UNAVAILABLE_TOOLS } from "../src/tools.js";
 
 const CONFIG = {
   apiUrl: "http://core.test",
-  apiKey: "secret-key-value",
+  agentKey: "secret-key-value",
+  tenantId: "33333333-3333-3333-3333-333333333333",
   timeoutMs: 1000,
   agentId: "hermes-test",
+  transport: "stdio" as const,
+  httpPort: 9000,
 };
 
 const okResponse = (body: unknown = { ok: true }) =>
@@ -109,7 +112,8 @@ describe("the client", () => {
 
     await new FreightClient(CONFIG, fetchImpl, () => {}).get("/shipments");
 
-    expect(headers["x-api-key"]).toBe("secret-key-value");
+    expect(headers["x-agent-key"]).toBe("secret-key-value");
+    expect(headers["x-agent-tenant-id"]).toBe(CONFIG.tenantId);
     expect(headers["x-agent-id"]).toBe("hermes-test");
     expect(headers["x-correlation-id"]).toMatch(/^[0-9a-f-]{36}$/);
   });
@@ -203,24 +207,59 @@ describe("errors an agent can act on", () => {
 });
 
 describe("configuration", () => {
+  const TENANT = "44444444-4444-4444-4444-444444444444";
+  const BASE = { FREIGHT_API_URL: "http://x", FREIGHT_MCP_AGENT_KEY: "k", FREIGHT_MCP_TENANT_ID: TENANT };
+
   it("refuses to start without an API url", () => {
-    expect(() => loadConfig({ FREIGHT_MCP_API_KEY: "k" } as NodeJS.ProcessEnv)).toThrow(
-      /FREIGHT_API_URL is required/,
-    );
+    expect(() =>
+      loadConfig({ FREIGHT_MCP_AGENT_KEY: "k", FREIGHT_MCP_TENANT_ID: TENANT } as NodeJS.ProcessEnv),
+    ).toThrow(/FREIGHT_API_URL is required/);
   });
 
   it("refuses to start without a credential", () => {
-    expect(() => loadConfig({ FREIGHT_API_URL: "http://x" } as NodeJS.ProcessEnv)).toThrow(
-      /FREIGHT_MCP_API_KEY is required/,
+    expect(() =>
+      loadConfig({ FREIGHT_API_URL: "http://x", FREIGHT_MCP_TENANT_ID: TENANT } as NodeJS.ProcessEnv),
+    ).toThrow(/FREIGHT_MCP_AGENT_KEY is required/);
+  });
+
+  it("refuses to start without a tenant id", () => {
+    expect(() =>
+      loadConfig({ FREIGHT_API_URL: "http://x", FREIGHT_MCP_AGENT_KEY: "k" } as NodeJS.ProcessEnv),
+    ).toThrow(/FREIGHT_MCP_TENANT_ID is required/);
+  });
+
+  it("refuses a tenant id that is not a uuid — the whole point is binding to exactly one", () => {
+    expect(() =>
+      loadConfig({
+        FREIGHT_API_URL: "http://x",
+        FREIGHT_MCP_AGENT_KEY: "k",
+        FREIGHT_MCP_TENANT_ID: "not-a-uuid",
+      } as NodeJS.ProcessEnv),
+    ).toThrow(/must be a uuid/);
+  });
+
+  it("defaults to stdio transport", () => {
+    const cfg = loadConfig(BASE as NodeJS.ProcessEnv);
+    expect(cfg.transport).toBe("stdio");
+  });
+
+  it("accepts http transport with a configurable port", () => {
+    const cfg = loadConfig({ ...BASE, MCP_TRANSPORT: "http", MCP_HTTP_PORT: "9100" } as NodeJS.ProcessEnv);
+    expect(cfg.transport).toBe("http");
+    expect(cfg.httpPort).toBe(9100);
+  });
+
+  it("refuses an unrecognised transport", () => {
+    expect(() => loadConfig({ ...BASE, MCP_TRANSPORT: "grpc" } as NodeJS.ProcessEnv)).toThrow(
+      /MCP_TRANSPORT must be/,
     );
   });
 
   it("has no database setting to misuse", () => {
-    const cfg = loadConfig({
-      FREIGHT_API_URL: "http://core.test/",
-      FREIGHT_MCP_API_KEY: "k",
-    } as NodeJS.ProcessEnv);
-    expect(Object.keys(cfg)).toEqual(["apiUrl", "apiKey", "timeoutMs", "agentId"]);
-    expect(cfg.apiUrl).toBe("http://core.test");
+    const cfg = loadConfig(BASE as NodeJS.ProcessEnv);
+    expect(Object.keys(cfg).sort()).toEqual(
+      ["agentId", "agentKey", "apiUrl", "httpPort", "tenantId", "timeoutMs", "transport"].sort(),
+    );
+    expect(cfg.apiUrl).toBe("http://x");
   });
 });

@@ -4,13 +4,15 @@ A read-only MCP server over the Freight Core API. It is how an agent — Hermes,
 or anything else that speaks MCP — reads the platform.
 
 ```
-   agent ──MCP/stdio──► freight-mcp ──GET + service key──► Freight Core API ──► Postgres
+   agent ──MCP (stdio or HTTP)──► freight-mcp ──GET + agent key──► Freight Core API ──► Postgres
 ```
 
 The server holds **no database credentials**, and there is no code here that
 would use one. Every request goes through the same authenticated API a person
-uses, so tenant scoping, role checks and rate limits apply to the agent exactly
-as they apply to a human. There is no faster path, because none is built.
+uses — via a dedicated agent-auth path in `jwt.guard.ts` that binds the caller
+to exactly one tenant — so tenant scoping, role checks and rate limits apply
+to the agent exactly as they apply to a human. There is no faster path,
+because none is built.
 
 ## Read-only, checked rather than asserted
 
@@ -24,22 +26,53 @@ configuration, by an environment variable, by someone debugging at 2am. **A
 capability that was never built cannot be used by anyone under any
 configuration**, and if someone does add a write path, the test goes red.
 
-## Running it
+## Running it — locally, over stdio
 
 ```bash
-cp .env.example .env      # fill in FREIGHT_MCP_API_KEY
+cp .env.example .env      # fill in FREIGHT_MCP_AGENT_KEY and FREIGHT_MCP_TENANT_ID
 pnpm --filter @forge-freight/freight-mcp build
 node dist/main.js
 ```
 
-It speaks MCP over stdio. Logs go to **stderr** — stdout is the protocol
-channel, and writing anything else there corrupts the stream.
+Logs go to **stderr** — stdout is the protocol channel, and writing anything
+else there corrupts the stream.
 
 To connect it to Claude Code locally:
 
 ```bash
 claude mcp add freight -- node /absolute/path/to/services/freight-mcp/dist/main.js
 ```
+
+## Running it — as a remote server, over HTTP
+
+Set `MCP_TRANSPORT=http` (and optionally `MCP_HTTP_PORT`, default `9000`).
+The server then listens on `POST /mcp` — a stateless
+`StreamableHTTPServerTransport`, a fresh one per request, since read-only tool
+calls have no multi-turn state worth holding onto — plus `GET /healthz` for a
+plain liveness check. This is the mode `infra/aws/mcp.tf` deploys to ECS
+Fargate: Fargate cannot give a container the interactive stdio channel a
+locally-spawned child process gets, so a persistent HTTP server is the only
+way to reach it from a remote agent host.
+
+```bash
+MCP_TRANSPORT=http node dist/main.js
+curl -s http://localhost:9000/healthz          # → ok
+```
+
+## Authentication
+
+Every request carries two headers: `x-agent-key` (must equal `AGENT_API_KEY`
+on the API) and `x-agent-tenant-id` (this instance's one tenant, set once via
+`FREIGHT_MCP_TENANT_ID` — never supplied by the caller). One instance, one
+tenant — the same shape `infrastructure/n8n` already uses, for the same
+reason: a malformed or hostile tool call cannot read across tenants when the
+tenant is server-side configuration, not something the request carries.
+
+The API's guard (`apps/api/src/modules/auth/jwt.guard.ts`) is opt-in and
+fails closed: an unset `AGENT_API_KEY` means this path never activates —
+normal Bearer/dev auth for everyone else is unaffected either way. On a
+match, the request is granted `roles: ["ops"]`, which is exactly what the
+read-only tool surface needs and nothing more.
 
 ## Tools
 
@@ -86,9 +119,12 @@ inference. The credential is never logged; there is a test for that.
 pnpm --filter @forge-freight/freight-mcp test
 ```
 
-21 tests: the tool surface, the read-only guarantee, header and correlation-id
+The tool surface, the read-only guarantee, header and correlation-id
 behaviour, credential redaction, timeout handling, error classification, and
-configuration refusing to start without what it needs.
+configuration refusing to start without what it needs — including the
+tenant-id shape and the transport switch. The API side of the auth path
+(`apps/api/test/jwt-guard-agent.test.ts`) is tested in `apps/api`, since it is
+API code, not this server's.
 
 Integration tests against a live API are not written yet, and the tools have
 not been exercised against real data. Reads-correctly and works-correctly are

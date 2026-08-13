@@ -40,7 +40,8 @@ export class FreightClient {
       const res = await this.fetchImpl(url.toString(), {
         method: "GET",
         headers: {
-          "x-api-key": this.cfg.apiKey,
+          "x-agent-key": this.cfg.agentKey,
+          "x-agent-tenant-id": this.cfg.tenantId,
           // Both ends log this, so "what did the agent do at 14:02" is
           // answerable by grep rather than by inference.
           "x-correlation-id": correlationId,

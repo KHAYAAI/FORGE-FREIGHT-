@@ -23,3 +23,11 @@ web_desired_count    = 2
 anthropic_api_key = ""
 aisstream_api_key = ""
 novu_api_key      = ""
+
+# The one tenant n8n and freight-mcp serve (both are one-instance-per-tenant
+# by design). Leave empty to deploy both with desired_count 0 — see
+# orchestration.tf and DEPLOY.md.
+freight_tenant_id = ""
+
+# 0 until you have an agent host that will actually call freight-mcp.
+freight_mcp_desired_count = 0

@@ -57,7 +57,7 @@ resource "aws_security_group" "ecs_services" {
 
 resource "aws_security_group" "supporting" {
   name        = "${local.name}-supporting"
-  description = "Self-hosted Redpanda/Temporal/Keycloak/yente tasks — internal only, reachable from api/worker/web"
+  description = "Self-hosted Redpanda/Temporal/Keycloak/yente PLUS Kestra/n8n/freight-mcp — internal only, reachable from api/worker/web"
   vpc_id      = aws_vpc.main.id
 
   ingress {
@@ -88,6 +88,23 @@ resource "aws_security_group_rule" "supporting_self" {
   security_group_id        = aws_security_group.supporting.id
   source_security_group_id = aws_security_group.supporting.id
 }
+
+# The reverse of the rule above: Kestra, n8n and freight-mcp (all in
+# `supporting`) each call OUT to the api service — the scheduled endpoints,
+# the RFQ webhook, the read-only tool routes. Reached over the private
+# service-discovery DNS added in orchestration.tf, not the public ALB, so
+# this traffic never leaves the VPC.
+resource "aws_security_group_rule" "ecs_services_from_supporting" {
+  type                     = "ingress"
+  from_port                = 3001
+  to_port                  = 3001
+  protocol                 = "tcp"
+  security_group_id        = aws_security_group.ecs_services.id
+  source_security_group_id = aws_security_group.supporting.id
+  description               = "api, from Kestra/n8n/freight-mcp"
+
+}
+
 
 resource "aws_security_group" "rds" {
   name        = "${local.name}-rds"
@@ -145,7 +162,7 @@ resource "aws_security_group" "opensearch" {
 
 resource "aws_security_group" "efs" {
   name        = "${local.name}-efs"
-  description = "EFS mount targets for Redpanda's data directory"
+  description = "EFS mount targets for Redpanda/Kestra/n8n data directories"
   vpc_id      = aws_vpc.main.id
 
   ingress {

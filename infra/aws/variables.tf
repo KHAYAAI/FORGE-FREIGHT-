@@ -180,6 +180,63 @@ variable "opensearch_volume_size_gb" {
   default = 30
 }
 
+# --- Kestra, n8n, freight-mcp (this session's automation/integration/agent
+# layer) — same self-hosted-on-Fargate tradeoff as the block above, and the
+# same scale path: managed alternatives exist for Kestra/n8n if volume ever
+# justifies leaving this topology.
+
+variable "kestra_task_cpu" {
+  type    = number
+  default = 512
+}
+
+variable "kestra_task_memory" {
+  type    = number
+  default = 1024
+}
+
+variable "n8n_task_cpu" {
+  type    = number
+  default = 512
+}
+
+variable "n8n_task_memory" {
+  type    = number
+  default = 1024
+}
+
+variable "freight_mcp_task_cpu" {
+  type    = number
+  default = 256
+}
+
+variable "freight_mcp_task_memory" {
+  type    = number
+  default = 512
+}
+
+variable "freight_mcp_desired_count" {
+  description = "0 disables freight-mcp entirely — nothing else depends on it. Set to 1 once you have an agent host that will actually call it."
+  type        = number
+  default     = 0
+}
+
+variable "freight_tenant_id" {
+  description = "The single tenant n8n and freight-mcp serve — both are one-instance-per-tenant by design (see infrastructure/n8n/README.md and services/freight-mcp/README.md). Required for either to start; leave empty to disable both (n8n still deploys but its workflow will refuse to quote, freight-mcp refuses to boot)."
+  type        = string
+  default     = ""
+}
+
+variable "kestra_admin_user" {
+  type    = string
+  default = "admin@forgefreight.local"
+}
+
+variable "n8n_admin_user" {
+  type    = string
+  default = "admin@forgefreight.local"
+}
+
 # --- DNS / TLS --------------------------------------------------------------
 
 variable "domain_name" {
