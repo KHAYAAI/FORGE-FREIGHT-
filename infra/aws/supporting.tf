@@ -205,9 +205,15 @@ resource "aws_ecs_task_definition" "keycloak" {
   task_role_arn            = aws_iam_role.generic_task.arn
 
   container_definitions = jsonencode([{
-    name         = "keycloak"
-    image        = "quay.io/keycloak/keycloak:25.0"
-    command      = ["start", "--optimized", "--hostname-strict=false", "--proxy=edge"]
+    name = "keycloak"
+    # Our own image (infra/aws/ecr.tf, infrastructure/keycloak/Dockerfile):
+    # quay.io/keycloak/keycloak:26.0 plus the baked-in forge-freight realm —
+    # see infrastructure/keycloak/README.md for what --import-realm sets up
+    # automatically (MFA, password policy, brute-force lockout, roles, the
+    # tenant_id claim mapper) vs what still needs a real customer's SAML
+    # metadata by hand.
+    image        = "${aws_ecr_repository.app["keycloak"].repository_url}:${var.image_tag}"
+    command      = ["start", "--optimized", "--hostname-strict=false", "--proxy=edge", "--import-realm"]
     portMappings = [{ containerPort = 8080, protocol = "tcp" }]
     environment = [
       { name = "KC_DB", value = "postgres" },
@@ -215,11 +221,18 @@ resource "aws_ecs_task_definition" "keycloak" {
       { name = "KC_DB_USERNAME", value = var.db_username },
       { name = "KC_HOSTNAME", value = local.dns_enabled ? local.auth_fqdn : "" },
       { name = "KC_HTTP_ENABLED", value = "true" },
-      { name = "KEYCLOAK_ADMIN", value = "admin" },
+      # KC_BOOTSTRAP_ADMIN_* — the current names as of Keycloak 26;
+      # KEYCLOAK_ADMIN/KEYCLOAK_ADMIN_PASSWORD were the pre-26 names this
+      # task definition used to carry, aligned now that the image is 26.0.
+      { name = "KC_BOOTSTRAP_ADMIN_USERNAME", value = "admin" },
     ]
     secrets = [
       { name = "KC_DB_PASSWORD", valueFrom = "${aws_secretsmanager_secret.db.arn}:password::" },
-      { name = "KEYCLOAK_ADMIN_PASSWORD", valueFrom = "${aws_secretsmanager_secret.db.arn}:password::" },
+      # Its own credential, not the database's — see orchestration.tf's
+      # integration secret. Reusing the DB password here was the previous
+      # shape; a bootstrap admin login and the database credential are two
+      # different things with two different blast radii if either leaks.
+      { name = "KC_BOOTSTRAP_ADMIN_PASSWORD", valueFrom = "${aws_secretsmanager_secret.integration.arn}:keycloak_admin_password::" },
     ]
     logConfiguration = {
       logDriver = "awslogs"

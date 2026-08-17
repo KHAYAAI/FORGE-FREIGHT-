@@ -21,10 +21,11 @@ not verified. Run `terraform plan` yourself before `apply` and read it.
 | Security groups (ALB, ECS services, supporting services, RDS, OpenSearch, EFS) | `security.tf` |
 | RDS Postgres 16 (single instance, multiple logical DBs) | `rds.tf` |
 | S3 bucket for documents (versioned, encrypted, private) | `s3.tf` |
-| ECR repos for api/worker/web | `ecr.tf` |
+| ECR repos for api/worker/web/freight-mcp/keycloak | `ecr.tf` |
 | ECS Fargate cluster, services, task defs for api/worker/web | `ecs.tf` |
 | ALB with host-based routing (api./app./auth.) + ACM cert | `alb.tf`, `dns.tf` |
-| Redpanda, Temporal, Keycloak, yente, OpenSearch — self-hosted on Fargate | `supporting.tf` |
+| AWS WAFv2 in front of the ALB (managed rule groups + edge rate limit) | `waf.tf` |
+| Redpanda, Temporal, Keycloak (realm baked in — see below), yente, OpenSearch — self-hosted on Fargate | `supporting.tf` |
 | Kestra (scheduler), n8n (integration), freight-mcp (read-only agent) | `orchestration.tf` |
 | IAM roles (ECS execution, api task, generic task) | `iam.tf` |
 | CloudWatch log groups per service | `observability.tf` |
@@ -93,15 +94,24 @@ aws ecr get-login-password --region af-south-1 | \
 
 docker build -f apps/api/Dockerfile -t <account-id>.dkr.ecr.af-south-1.amazonaws.com/forge-freight-production/api:latest .
 docker push <account-id>.dkr.ecr.af-south-1.amazonaws.com/forge-freight-production/api:latest
-# repeat for worker, web
+# repeat for worker (apps/worker/Dockerfile) and web (apps/web/Dockerfile)
+
+# freight-mcp and keycloak are also our own images now, same pattern —
+# keycloak's build context is infrastructure/keycloak itself, not the repo
+# root, since it has no workspace packages to build:
+docker build -f services/freight-mcp/Dockerfile -t <account-id>.dkr.ecr.af-south-1.amazonaws.com/forge-freight-production/freight-mcp:latest .
+docker push <account-id>.dkr.ecr.af-south-1.amazonaws.com/forge-freight-production/freight-mcp:latest
+docker build -t <account-id>.dkr.ecr.af-south-1.amazonaws.com/forge-freight-production/keycloak:latest infrastructure/keycloak
+docker push <account-id>.dkr.ecr.af-south-1.amazonaws.com/forge-freight-production/keycloak:latest
 ```
 
 Then force a fresh deployment so the services pick up the images:
 
 ```bash
-aws ecs update-service --cluster forge-freight-production --service forge-freight-production-api --force-new-deployment
-aws ecs update-service --cluster forge-freight-production --service forge-freight-production-worker --force-new-deployment
-aws ecs update-service --cluster forge-freight-production --service forge-freight-production-web --force-new-deployment
+for svc in api worker web keycloak; do
+  aws ecs update-service --cluster forge-freight-production --service "forge-freight-production-${svc}" --force-new-deployment
+done
+# freight-mcp only if you've raised freight_mcp_desired_count above 0
 ```
 
 ## Manual one-time steps Terraform can't do for you
@@ -128,13 +138,29 @@ distinction `LAUNCH.md` draws for the non-AWS deployment path.
    ```bash
    aws secretsmanager get-secret-value --secret-id forge-freight-production/database --query SecretString --output text | jq -r .password
    ```
-2. **Keycloak realm import.** The `keycloak` container starts with an empty
-   realm. Log into `https://auth.<domain>` with the bootstrap admin
-   (`admin` / the same Secrets Manager password reused for convenience — see
-   `supporting.tf`; rotate this immediately after first login), then create
-   the `forge-freight` realm, clients, and roles. If you have an existing
-   realm export from another environment, import it here instead of
-   clicking through by hand.
+2. **Keycloak realm — mostly automatic now.** The `keycloak` container is our
+   own image (`infrastructure/keycloak/`, built and pushed by
+   `.github/workflows/deploy-aws.yml` like api/worker/web) with the
+   `forge-freight` realm baked in and imported automatically via
+   `--import-realm` on first boot: the `admin`/`finance`/`ops` roles, the
+   `tenant_id` claim mapper RBAC and tenant isolation depend on, MFA
+   (TOTP required for every new user), a 12-character password policy, and
+   brute-force lockout are all live with no clicking required — see
+   `infrastructure/keycloak/README.md` for exactly what's configured.
+   What's still a real operator action:
+   - Log into `https://auth.<domain>` with the bootstrap admin (`admin` /
+     the password in the `${name}/integration` Secrets Manager secret's
+     `keycloak_admin_password` key — its own credential now, not the
+     database's; rotate it after first login).
+   - Replace the `REPLACE-WITH-YOUR-DOMAIN.example.com` placeholders in the
+     `forge-web` client's redirect URIs with the real domain (the realm
+     export can't reach into this file's Terraform locals for that
+     substitution).
+   - If federating to a customer's SAML IdP: fill in the disabled
+     `customer-saml` identity provider template with their real SSO URL,
+     signing certificate, and entity ID, then enable it — see
+     `infrastructure/keycloak/README.md` for the exact steps and why none of
+     that can be filled in ahead of a real customer conversation.
 3. **yente's sanctions dataset.** The OpenSearch domain starts empty — yente
    needs its OpenSanctions dataset indexed before screening returns anything
    meaningful. Trigger yente's own index-build process per its docs; this is

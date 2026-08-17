@@ -1,0 +1,202 @@
+{
+  "realm": "forge-freight",
+  "enabled": true,
+  "sslRequired": "external",
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "resetPasswordAllowed": true,
+  "editUsernameAllowed": false,
+  "rememberMe": false,
+
+  "bruteForceProtected": true,
+  "permanentLockout": false,
+  "failureFactor": 5,
+  "waitIncrementSeconds": 60,
+  "quickLoginCheckMilliSeconds": 1000,
+  "minimumQuickLoginWaitSeconds": 60,
+  "maxFailureWaitSeconds": 900,
+  "maxDeltaTimeSeconds": 43200,
+
+  "passwordPolicy": "length(12) and digits(1) and lowerCase(1) and upperCase(1) and specialChars(1) and notUsername(undefined) and notEmail(undefined) and passwordHistory(5) and forceExpiredPasswordChange(90)",
+
+  "accessTokenLifespan": 300,
+  "ssoSessionIdleTimeout": 1800,
+  "ssoSessionMaxLifespan": 36000,
+  "offlineSessionIdleTimeout": 2592000,
+
+  "otpPolicyType": "totp",
+  "otpPolicyAlgorithm": "HmacSHA1",
+  "otpPolicyDigits": 6,
+  "otpPolicyPeriod": 30,
+  "otpPolicyLookAheadWindow": 1,
+  "requiredActions": [
+    {
+      "alias": "CONFIGURE_TOTP",
+      "name": "Configure OTP",
+      "providerId": "CONFIGURE_TOTP",
+      "enabled": true,
+      "defaultAction": true,
+      "priority": 10,
+      "config": {}
+    },
+    {
+      "alias": "UPDATE_PASSWORD",
+      "name": "Update Password",
+      "providerId": "UPDATE_PASSWORD",
+      "enabled": true,
+      "defaultAction": false,
+      "priority": 20,
+      "config": {}
+    },
+    {
+      "alias": "VERIFY_EMAIL",
+      "name": "Verify Email",
+      "providerId": "VERIFY_EMAIL",
+      "enabled": true,
+      "defaultAction": false,
+      "priority": 50,
+      "config": {}
+    }
+  ],
+
+  "roles": {
+    "realm": [
+      { "name": "admin", "description": "Changes what the business is: prices, margins, partners, tenant visibility." },
+      { "name": "finance", "description": "Money in and out: issuing invoices, recording payments." },
+      { "name": "ops", "description": "Moving freight day to day: quotes, bookings, customs, documents, exceptions. Default role for staff." }
+    ]
+  },
+
+  "attributes": {
+    "userProfile": {
+      "attributes": [
+        {
+          "name": "tenant_id",
+          "displayName": "Tenant ID",
+          "required": { "roles": ["user"] },
+          "permissions": {
+            "view": ["admin"],
+            "edit": ["admin"]
+          },
+          "validations": {
+            "pattern": {
+              "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+              "error-message": "tenant_id must be a uuid"
+            }
+          }
+        }
+      ]
+    }
+  },
+
+  "clientScopes": [
+    {
+      "name": "tenant",
+      "description": "Puts tenant_id on the token — required for every FORGE Freight client.",
+      "protocol": "openid-connect",
+      "attributes": {
+        "include.in.token.scope": "true",
+        "display.on.consent.screen": "false"
+      },
+      "protocolMappers": [
+        {
+          "name": "tenant_id",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "user.attribute": "tenant_id",
+            "claim.name": "tenant_id",
+            "jsonType.label": "String",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true"
+          }
+        }
+      ]
+    }
+  ],
+
+  "defaultDefaultClientScopes": ["role_list", "profile", "email", "roles", "web-origins", "tenant"],
+
+  "clients": [
+    {
+      "clientId": "forge-web",
+      "name": "FORGE Freight Console",
+      "enabled": true,
+      "publicClient": true,
+      "protocol": "openid-connect",
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "redirectUris": [
+        "http://localhost:3000/api/auth/callback",
+        "https://REPLACE-WITH-YOUR-DOMAIN.example.com/api/auth/callback"
+      ],
+      "webOrigins": ["http://localhost:3000", "https://REPLACE-WITH-YOUR-DOMAIN.example.com"],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "http://localhost:3000/*##https://REPLACE-WITH-YOUR-DOMAIN.example.com/*"
+      },
+      "defaultClientScopes": ["web-origins", "role_list", "profile", "roles", "email", "tenant"]
+    },
+    {
+      "clientId": "forge-api",
+      "name": "FORGE Freight API (audience only)",
+      "enabled": true,
+      "publicClient": false,
+      "bearerOnly": true,
+      "protocol": "openid-connect",
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false
+    }
+  ],
+
+  "identityProviders": [
+    {
+      "alias": "customer-saml",
+      "displayName": "Customer SAML IdP (template — disabled, fill in and enable per customer)",
+      "providerId": "saml",
+      "enabled": false,
+      "trustEmail": true,
+      "storeToken": false,
+      "addReadTokenRoleOnCreate": false,
+      "firstBrokerLoginFlowAlias": "first broker login",
+      "config": {
+        "entityId": "https://REPLACE-WITH-YOUR-DOMAIN.example.com/realms/forge-freight",
+        "singleSignOnServiceUrl": "REPLACE-ME-the-customer-IdPs-SAML-SSO-URL",
+        "singleLogoutServiceUrl": "REPLACE-ME-optional-the-customer-IdPs-SLO-URL",
+        "nameIDPolicyFormat": "urn:oasis:names:tc:SAML:2.0:nameid-format:persistent",
+        "signingCertificate": "REPLACE-ME-the-customer-IdPs-signing-certificate-PEM-no-headers",
+        "wantAssertionsSigned": "true",
+        "wantAuthnRequestsSigned": "true",
+        "validateSignature": "true",
+        "postBindingResponse": "true",
+        "postBindingAuthnRequest": "true",
+        "syncMode": "IMPORT"
+      }
+    }
+  ],
+  "identityProviderMappers": [
+    {
+      "name": "saml-tenant-id",
+      "identityProviderAlias": "customer-saml",
+      "identityProviderMapper": "saml-user-attribute-idp-mapper",
+      "config": {
+        "attribute.name": "tenant_id",
+        "user.attribute": "tenant_id"
+      }
+    },
+    {
+      "name": "saml-default-role",
+      "identityProviderAlias": "customer-saml",
+      "identityProviderMapper": "saml-hardcoded-role-idp-mapper",
+      "config": {
+        "role": "ops"
+      }
+    }
+  ]
+}

@@ -47,19 +47,25 @@ resource "random_password" "n8n_encryption_key" {
   special = false
 }
 
+resource "random_password" "keycloak_admin_password" {
+  length  = 24
+  special = false
+}
+
 resource "aws_secretsmanager_secret" "integration" {
   name        = "${local.name}/integration"
-  description = "Shared credentials for the automation/integration/agent layer: api, Kestra, n8n, freight-mcp"
+  description = "Shared credentials for the automation/integration/agent layer: api, Kestra, n8n, freight-mcp, Keycloak"
 }
 
 resource "aws_secretsmanager_secret_version" "integration" {
   secret_id = aws_secretsmanager_secret.integration.id
   secret_string = jsonencode({
-    ingest_api_key        = random_password.ingest_api_key.result
-    agent_api_key         = random_password.agent_api_key.result
-    kestra_admin_password = random_password.kestra_admin_password.result
-    n8n_admin_password    = random_password.n8n_admin_password.result
-    n8n_encryption_key    = random_password.n8n_encryption_key.result
+    ingest_api_key          = random_password.ingest_api_key.result
+    agent_api_key           = random_password.agent_api_key.result
+    kestra_admin_password   = random_password.kestra_admin_password.result
+    n8n_admin_password      = random_password.n8n_admin_password.result
+    n8n_encryption_key      = random_password.n8n_encryption_key.result
+    keycloak_admin_password = random_password.keycloak_admin_password.result
   })
 }
 

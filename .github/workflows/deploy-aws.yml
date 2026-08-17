@@ -64,6 +64,24 @@ jobs:
           push: true
           tags: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPO_PREFIX }}/web:${{ steps.tag.outputs.image_tag }}
 
+      - name: Build and push freight-mcp
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: services/freight-mcp/Dockerfile
+          push: true
+          tags: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPO_PREFIX }}/freight-mcp:${{ steps.tag.outputs.image_tag }}
+
+      # infrastructure/keycloak/Dockerfile has its own build context (just
+      # that directory, not the whole repo) — it only COPYs
+      # realm-export.json in, it has no workspace packages to build.
+      - name: Build and push keycloak
+        uses: docker/build-push-action@v6
+        with:
+          context: infrastructure/keycloak
+          push: true
+          tags: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPO_PREFIX }}/keycloak:${{ steps.tag.outputs.image_tag }}
+
   deploy:
     needs: build-and-push
     runs-on: ubuntu-latest
@@ -90,7 +108,16 @@ jobs:
 
       - name: Wait for ECS services to stabilize
         run: |
-          for svc in api worker web; do
+          # keycloak and freight-mcp now build from this pipeline too (their
+          # own Dockerfiles, tagged with the same image_tag as api/worker/
+          # web) rather than a statically-pinned public image, so a bad
+          # build of either should fail this step the same way a bad api
+          # build already does. freight-mcp defaults to desired_count 0
+          # (var.freight_mcp_desired_count) — `services-stable` returns
+          # immediately when desired and running are both zero, so this is
+          # a no-op until an operator turns it on. kestra/n8n pull public
+          # images unrelated to image_tag and aren't part of this wait.
+          for svc in api worker web keycloak freight-mcp; do
             aws ecs wait services-stable \
               --cluster forge-freight-production \
               --services "forge-freight-production-${svc}"

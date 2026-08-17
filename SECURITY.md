@@ -138,27 +138,35 @@ never a network-facing process, on Linux CI and Linux containers only.
 Left unforced because overriding it risks breaking `vitest`'s internal
 `vite-node` wiring for a bug this deployment cannot be reached by.
 
-## Operator-configured controls (not in this repo)
+## Identity provider controls
 
-These are real Keycloak realm settings, not application code — automating
-them from Terraform would mean managing Keycloak-as-code, which this
-platform does not do (see `DEPLOY.md`'s "Keycloak realm import" step: the
-realm is created once, by hand, on first deploy). Listed here so "do we have
-X" has an honest answer instead of silence:
+Keycloak realm settings, not application code — but as of this pass they're
+no longer manual clicking either. `infrastructure/keycloak/realm-export.json`
+is baked into a custom Keycloak image
+(`infrastructure/keycloak/Dockerfile`) and imported automatically via
+`--import-realm` on first boot, in both `docker-compose.yml` (local) and
+`infra/aws/supporting.tf` (AWS) — see
+`infrastructure/keycloak/README.md` for the full detail.
 
 | Control | Where | Status |
 |---|---|---|
 | SSO / OIDC | Keycloak, federated to any IdP | **Live** — this is the architecture, not a setting to turn on |
-| SAML federation to an enterprise IdP | Keycloak realm → Identity Providers | Not configured; a realm-config change, no code change, once a customer names their IdP |
-| MFA / TOTP | Keycloak realm → Authentication → required actions | Not enabled by default; one realm setting |
-| Password policy (length, complexity, rotation) | Keycloak realm → Authentication → policy | Not configured; Keycloak default applies until set |
-| Brute-force / account lockout | Keycloak realm → Security defenses | Not enabled by default; one realm setting |
-| Access/refresh token lifetimes | Keycloak realm → Tokens | Keycloak default applies until tuned |
-| Session idle/max timeout | Keycloak realm → Sessions | Keycloak default applies until tuned |
+| RBAC realm roles + `tenant_id` claim mapper | `realm-export.json` `roles` / `clientScopes` | **Live** — imported automatically; without this, `AUTH_ROLES=advisory`'s "token carries no roles at all" warning is what every login would actually produce |
+| MFA / TOTP | `realm-export.json` `requiredActions[CONFIGURE_TOTP]` | **Live** — required for every new user on first login, realm-wide by default; scoping it to specific roles instead is documented in the Keycloak README |
+| Password policy (length, complexity, history, rotation) | `realm-export.json` `passwordPolicy` | **Live** — 12 char minimum, mixed case + digit + special, no username/email reuse, 5-password history, 90-day rotation |
+| Brute-force / account lockout | `realm-export.json` `bruteForceProtected` + thresholds | **Live** — 5 failures locks the account out with escalating wait, capped at 15 minutes, never permanent |
+| SAML federation to a specific customer IdP | `realm-export.json` `identityProviders[customer-saml]` | **Templated, disabled** — a complete, working SAML broker config with placeholder SSO URL/certificate; enabling it for a real customer requires their actual IdP metadata, which cannot be known in advance (see the Keycloak README's step-by-step) |
+| Access/refresh token lifetimes | `realm-export.json` `accessTokenLifespan` etc. | **Live** — 5-minute access token, 30-minute idle session, 10-hour max session |
+| Client redirect URIs for the real production domain | `realm-export.json` `clients[forge-web].redirectUris` | **Placeholder** — the realm export can't reach into Terraform's `local.web_fqdn`; replace `REPLACE-WITH-YOUR-DOMAIN.example.com` once a real domain exists |
 
-None of these need a deploy of this repository to change — they're a login
-to the Keycloak admin console. They're listed as gaps because "not
-configured" is the honest current state, not because closing them is hard.
+The `--import-realm` mechanism only creates a realm that doesn't already
+exist — a redeploy never clobbers whatever an admin has since changed by
+hand in the Keycloak console. And as with everything else in this document:
+`realm-export.json` is written against Keycloak 26's documented import
+schema and is valid JSON, but has not been verified by an actual import
+against a live Keycloak in this environment — no Docker daemon here. Run
+`docker compose up -d keycloak` locally and confirm the import succeeds
+before trusting it in production.
 
 ## Reporting a vulnerability
 

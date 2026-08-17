@@ -56,8 +56,13 @@ services:
       - "8233:8080"
 
   keycloak:
-    image: quay.io/keycloak/keycloak:26.0
-    command: ["start-dev"]
+    # Built, not pulled: bakes in infrastructure/keycloak/realm-export.json
+    # (MFA, password policy, brute-force lockout, the forge-web/forge-api
+    # clients, a disabled SAML template — see that directory's README) so
+    # `docker compose up -d` boots straight into a configured realm instead
+    # of an empty one waiting on manual clicking.
+    build: infrastructure/keycloak
+    command: ["start-dev", "--import-realm"]
     environment:
       KC_BOOTSTRAP_ADMIN_USERNAME: admin
       KC_BOOTSTRAP_ADMIN_PASSWORD: admin
