@@ -28,9 +28,16 @@ async function bootstrap() {
     app.getHttpAdapter().getInstance().set("trust proxy", 1);
   }
 
+  // No `credentials: true`: the API never sets a cookie and never reads one
+  // for auth — every caller presents a bearer token or a machine key (see
+  // jwt.guard.ts). The browser never even reaches this origin directly;
+  // apps/web is a same-origin BFF that holds the session cookie server-side
+  // and forwards a Bearer token (apps/web/src/app/api/proxy/[...path]/route.ts).
+  // Allowing credentialed cross-origin requests here would be dead
+  // configuration that could mislead a future integration into sending
+  // cookies cross-site — narrower is safer with no functional cost.
   app.enableCors({
     origin: cfg.CORS_ORIGINS.split(",").map((o) => o.trim()),
-    credentials: true,
   });
   app.enableShutdownHooks();
   await app.listen(cfg.PORT);

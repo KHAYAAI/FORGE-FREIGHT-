@@ -237,6 +237,12 @@ variable "n8n_admin_user" {
   default = "admin@forgefreight.local"
 }
 
+variable "waf_rate_limit_per_5min" {
+  description = "WAFv2 rate-based rule: requests from one IP in a rolling 5-minute window before it's blocked at the edge. Well above legitimate traffic from a single office/NAT gateway, well below what a flood needs to hurt api's own ThrottlerModule limits (100 req/min/IP) upstream."
+  type        = number
+  default     = 3000
+}
+
 # --- DNS / TLS --------------------------------------------------------------
 
 variable "domain_name" {

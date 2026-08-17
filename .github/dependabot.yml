@@ -1,0 +1,36 @@
+version: 2
+updates:
+  # One entry covers the whole pnpm workspace — Dependabot resolves the
+  # workspace graph from the root pnpm-lock.yaml, so per-package entries for
+  # apps/api, apps/web, services/freight-mcp etc. would be redundant.
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+    groups:
+      # One PR for routine patch/minor bumps instead of dozens — the CVE
+      # fixes this session applied by hand (drizzle-orm, multer, next,
+      # vitest, sharp, postcss, nanoid, fast-uri, brace-expansion) are the
+      # kind of thing this group would otherwise catch automatically.
+      patch-and-minor:
+        update-types: ["patch", "minor"]
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+
+  - package-ecosystem: "terraform"
+    directory: "/infra/aws"
+    schedule:
+      interval: "weekly"
+
+  - package-ecosystem: "docker"
+    directories:
+      - "/apps/api"
+      - "/apps/web"
+      - "/apps/worker"
+      - "/services/freight-mcp"
+    schedule:
+      interval: "weekly"

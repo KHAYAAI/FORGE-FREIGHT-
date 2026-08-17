@@ -21,6 +21,14 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm build
       - run: pnpm test
+      # Blocking: a new critical CVE in the dependency tree fails the build.
+      # Non-blocking below: high/moderate findings are visible in the log for
+      # the next dependency-hygiene pass without stalling every PR on
+      # transitive dev-tooling advisories that may have no fix yet — see
+      # SECURITY.md for the accepted-residual-findings list this compares
+      # against.
+      - run: pnpm audit --audit-level=critical
+      - run: pnpm audit --audit-level=high || true
 
   integration:
     runs-on: ubuntu-latest

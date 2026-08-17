@@ -26,6 +26,11 @@ resource "aws_db_instance" "main" {
   db_subnet_group_name   = aws_db_subnet_group.main.name
   vpc_security_group_ids = [aws_security_group.rds.id]
 
+  # Explicit, not relying on the provider default: the private subnet
+  # placement already makes this unreachable from the internet, but a
+  # reviewer shouldn't have to know that to confirm it.
+  publicly_accessible = false
+
   backup_retention_period = var.db_backup_retention_days
   backup_window           = "02:00-03:00"
   maintenance_window      = "mon:03:30-mon:04:30"
