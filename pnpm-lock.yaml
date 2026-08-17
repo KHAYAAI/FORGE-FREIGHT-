@@ -36,7 +36,7 @@ importers:
     dependencies:
       '@anthropic-ai/sdk':
         specifier: ^0.110.0
-        version: 0.110.0(zod@3.25.76)
+        version: 0.110.0(zod@4.4.3)
       '@aws-sdk/client-s3':
         specifier: ^3.1085.0
         version: 3.1085.0
@@ -95,8 +95,8 @@ importers:
         specifier: ^2.6.1
         version: 2.9.0
       zod:
-        specifier: ^3.25.76
-        version: 3.25.76
+        specifier: ^4.4.3
+        version: 4.4.3
     devDependencies:
       '@types/express':
         specifier: ^5.0.6
@@ -240,8 +240,8 @@ importers:
   packages/events:
     dependencies:
       zod:
-        specifier: ^3.24.1
-        version: 3.25.76
+        specifier: ^4.4.3
+        version: 4.4.3
     devDependencies:
       '@types/node':
         specifier: ^22.20.1
@@ -259,8 +259,8 @@ importers:
         specifier: workspace:*
         version: link:../events
       zod:
-        specifier: ^3.24.1
-        version: 3.25.76
+        specifier: ^4.4.3
+        version: 4.4.3
     devDependencies:
       '@types/node':
         specifier: ^22.20.1
@@ -276,10 +276,10 @@ importers:
     dependencies:
       '@modelcontextprotocol/sdk':
         specifier: ^1.0.4
-        version: 1.30.0(zod@3.25.76)
+        version: 1.30.0(zod@4.4.3)
       zod:
-        specifier: ^3.24.1
-        version: 3.25.76
+        specifier: ^4.4.3
+        version: 4.4.3
     devDependencies:
       tsx:
         specifier: ^4.19.2
@@ -4131,19 +4131,19 @@ packages:
     peerDependencies:
       zod: ^3.25.0 || ^4.0.0
 
-  zod@3.25.76:
-    resolution: {integrity: sha512-gzUt/qt81nXsFGKIFcC3YnfEAx5NkunCfnDlvuBSSFS02bcXu4Lmea0AFIUwbLWxWPx3d9p8S5QoaujKcNQxcQ==}
+  zod@4.4.3:
+    resolution: {integrity: sha512-ytENFjIJFl2UwYglde2jchW2Hwm4GJFLDiSXWdTrJQBIN9Fcyp7n4DhxJEiWNAJMV1/BqWfW/kkg71UDcHJyTQ==}
 
 snapshots:
 
   '@alloc/quick-lru@5.2.0': {}
 
-  '@anthropic-ai/sdk@0.110.0(zod@3.25.76)':
+  '@anthropic-ai/sdk@0.110.0(zod@4.4.3)':
     dependencies:
       json-schema-to-ts: 3.1.1
       standardwebhooks: 1.0.0
     optionalDependencies:
-      zod: 3.25.76
+      zod: 4.4.3
 
   '@asamuzakjp/css-color@5.1.11':
     dependencies:
@@ -5103,7 +5103,7 @@ snapshots:
 
   '@lukeed/csprng@1.1.0': {}
 
-  '@modelcontextprotocol/sdk@1.30.0(zod@3.25.76)':
+  '@modelcontextprotocol/sdk@1.30.0(zod@4.4.3)':
     dependencies:
       '@hono/node-server': 2.1.0(hono@4.13.1)
       ajv: 8.20.0
@@ -5120,8 +5120,8 @@ snapshots:
       json-schema-typed: 8.0.2
       pkce-challenge: 5.0.1
       raw-body: 3.0.2
-      zod: 3.25.76
-      zod-to-json-schema: 3.25.2(zod@3.25.76)
+      zod: 4.4.3
+      zod-to-json-schema: 3.25.2(zod@4.4.3)
     transitivePeerDependencies:
       - supports-color
 
@@ -6324,8 +6324,8 @@ snapshots:
       '@babel/parser': 7.29.7
       eslint: 10.6.0(jiti@2.7.0)
       hermes-parser: 0.25.1
-      zod: 3.25.76
-      zod-validation-error: 4.0.2(zod@3.25.76)
+      zod: 4.4.3
+      zod-validation-error: 4.0.2(zod@4.4.3)
     transitivePeerDependencies:
       - supports-color
 
@@ -7758,12 +7758,12 @@ snapshots:
 
   yocto-queue@0.1.0: {}
 
-  zod-to-json-schema@3.25.2(zod@3.25.76):
+  zod-to-json-schema@3.25.2(zod@4.4.3):
     dependencies:
-      zod: 3.25.76
+      zod: 4.4.3
 
-  zod-validation-error@4.0.2(zod@3.25.76):
+  zod-validation-error@4.0.2(zod@4.4.3):
     dependencies:
-      zod: 3.25.76
+      zod: 4.4.3
 
-  zod@3.25.76: {}
+  zod@4.4.3: {}
