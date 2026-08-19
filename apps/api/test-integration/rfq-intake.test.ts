@@ -5,6 +5,7 @@ import {
   events,
   marginRules,
   parties,
+  quotes,
   rateCards,
   tenants,
   type Db,
@@ -80,6 +81,11 @@ describe("RFQ intake (integration)", () => {
     await db.delete(events).where(eq(events.tenantId, tenantId));
     await db.delete(marginRules).where(eq(marginRules.tenantId, tenantId));
     await db.delete(rateCards).where(eq(rateCards.tenantId, tenantId));
+    // Every RFQ this suite quotes writes a quotes row referencing the
+    // customer party (quotes.customerId -> parties.id, no cascade) — delete
+    // quotes first or this violates quotes_customer_id_parties_id_fk.
+    // quoteLines cascades off quotes itself, so nothing else to clean here.
+    await db.delete(quotes).where(eq(quotes.tenantId, tenantId));
     await db.delete(parties).where(eq(parties.tenantId, tenantId));
     await db.delete(tenants).where(eq(tenants.id, tenantId));
   });
