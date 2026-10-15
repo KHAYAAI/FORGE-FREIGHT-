@@ -48,7 +48,7 @@ jobs:
             -movflags +faststart -an console/tour-out/forge-freight-console-tour.mp4
 
       - name: Upload to release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: console/tour-out/forge-freight-console-tour.mp4
           tag_name: console-tour-latest
