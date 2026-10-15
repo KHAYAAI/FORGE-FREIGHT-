@@ -41,7 +41,7 @@ jobs:
         uses: aws-actions/amazon-ecr-login@v2
 
       - name: Build and push api
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: apps/api/Dockerfile
@@ -49,7 +49,7 @@ jobs:
           tags: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPO_PREFIX }}/api:${{ steps.tag.outputs.image_tag }}
 
       - name: Build and push worker
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: apps/worker/Dockerfile
@@ -57,7 +57,7 @@ jobs:
           tags: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPO_PREFIX }}/worker:${{ steps.tag.outputs.image_tag }}
 
       - name: Build and push web
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: apps/web/Dockerfile
@@ -65,7 +65,7 @@ jobs:
           tags: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPO_PREFIX }}/web:${{ steps.tag.outputs.image_tag }}
 
       - name: Build and push freight-mcp
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: services/freight-mcp/Dockerfile
@@ -76,7 +76,7 @@ jobs:
       # that directory, not the whole repo) — it only COPYs
       # realm-export.json in, it has no workspace packages to build.
       - name: Build and push keycloak
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: infrastructure/keycloak
           push: true
